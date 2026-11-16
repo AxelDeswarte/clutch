@@ -128,44 +128,42 @@ GAMES.reflex = {
 
 // ───────────────────────── ESCALATOR ─────────────────────────
 GAMES.seq = {
-  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'taper la flèche affichée en grand']],
+  keys: [[[['Z', 'Q', 'S', 'D']], 'taper la lettre affichée en grand'], [[['⬆', '⬇', '⬅', '➡']], 'marche aussi (⬆ = Z, ⬅ = Q, ⬇ = S, ➡ = D)']],
   touch: 'flèches sous le jeu',
   icon: '🛗',
-  desc: 'Tape les flèches, le broyeur monte',
+  desc: 'Tape Z Q S D, le broyeur monte',
   title: 'Escalator',
   min: 2,
-  rules: "Tu montes un escalator… avec un broyeur juste en dessous. Bonne flèche = tu montes, mauvaise = tu glisses vers les lames. Arrive en haut avant d'être haché.",
+  rules: "Tu montes un escalator sans fin… avec un broyeur juste en dessous qui accélère. Bonne lettre = tu montes d'une marche, mauvaise = tu glisses de 2 vers les lames. Dernier survivant gagne.",
   create(room) {
-    const n = room.n, TOP = 40, DT = 0.1;
-    const seq = Array.from({ length: 80 }, () => pick(DIRS));
+    const n = room.n, WIN = 26, DT = 0.1; // WIN = nombre de marches visibles à l'écran
+    const seq = Array.from({ length: 400 }, () => pick(DIRS));
     const idx = new Array(n).fill(0), pos = new Array(n).fill(4);
     const alive = new Array(n).fill(true), deathT = new Array(n).fill(0);
-    const race = new Race(room);
     let c = 0, t = 0;
-    const scores = () => range(n).map((i) => (race.done[i] ? 3e6 - race.order.indexOf(i) : alive[i] ? 2e6 + pos[i] : deathT[i]));
-    const end = () => room.finish(scores());
-    const check = () => { if (room.survivalOver(range(n).map((i) => alive[i] && !race.done[i]))) end(); };
+    const scores = () => range(n).map((i) => (alive[i] ? 1e9 + pos[i] : deathT[i]));
+    const end = () => room.finish(scores(), `Plus haut : ${Math.floor(Math.max(...pos))} marches`);
+    const check = () => { if (room.survivalOver(alive)) end(); };
     const state = () => ({ t: 'g', k: 's', pos: pos.map((p) => +p.toFixed(2)), c: +c.toFixed(2), al: alive, idx });
     function step() {
       t += DT;
-      c += (1.1 + t * 0.06) * DT;
+      c += (1.2 + t * 0.08) * DT;
       range(n).forEach((i) => {
-        if (alive[i] && !race.done[i] && c >= pos[i]) { alive[i] = false; deathT[i] = t; room.eliminate(i); }
+        if (alive[i] && c >= pos[i]) { alive[i] = false; deathT[i] = t; room.eliminate(i); }
       });
       room.send(state());
       check();
     }
     return {
       start() {
-        room.send({ t: 'g', k: 'esc', seq, top: TOP });
+        room.send({ t: 'g', k: 'esc', seq, top: WIN });
         room.every(step, DT * 1000);
-        room.later(end, 60000);
+        room.later(end, 120000);
       },
       input(i, m) {
-        if (m.a !== 'key' || !alive[i] || race.done[i] || !DIRS.includes(m.key)) return;
-        if (m.key === seq[idx[i] % seq.length]) { idx[i]++; pos[i] = Math.min(TOP, pos[i] + 1); }
+        if (m.a !== 'key' || !alive[i] || !DIRS.includes(m.key)) return;
+        if (m.key === seq[idx[i] % seq.length]) { idx[i]++; pos[i] += 1; }
         else pos[i] = Math.max(0, pos[i] - 2);
-        if (pos[i] >= TOP) race.finish(i, end);
         room.send(state());
         check();
       },
@@ -518,17 +516,18 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [], SHOVE = 3
 const circleSpawn = (W, H, rx, ry) => (i, n) => { const a = (i / n) * Math.PI * 2 + Math.PI; return [W / 2 + Math.cos(a) * rx, H / 2 + Math.sin(a) * ry]; };
 
 // ───────────────────────── LE FILTRE ─────────────────────────
-const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex'], ['🖼️', 'Diplôme encadré'], ['🖼️', 'Portrait du patron'], ['🖼️', 'Selfie de mariage']];
+// objets de valeur → caisse (emojis anciens : ils s'affichent partout)
+const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex'], ['🏺', 'Vase de mamie'], ['📚', 'Livres rares'], ['🎸', 'Guitare'], ['🎁', 'Cadeau'], ['👑', 'Couronne'], ['⌚', 'Montre'], ['🎻', 'Violon']];
 // emojis anciens uniquement : les récents (🪛…) ne s'affichent pas partout (Windows 10)
 const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🔨', 'Marteau'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
 GAMES.filter = {
-  keys: [[[['⬅'], ['Q']], '🔥 four : la ferraille 🔩 ⚙️ 🔧'], [[['➡'], ['D']], '📦 caisse : les tableaux 🖼️']],
+  keys: [[[['⬅'], ['Q']], '🔥 four : la ferraille 🔩 ⚙️ 🔧 🔨 🔗 🧲'], [[['➡'], ['D']], '📦 caisse : les objets de valeur 🖼️ 🏺 📚 🎸 🎁 👑 ⌚ 🎻']],
   touch: 'gros boutons au-dessus du tapis',
   icon: '🔥',
   desc: 'Trie le plus vite possible en 30 s',
   title: 'Le Filtre',
   min: 2,
-  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les tableaux en caisse. Une erreur = tu es sonné 1,5 s. 30 secondes : celui qui en a trié le plus gagne.",
+  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les objets de valeur en caisse. Tu as 3 vies ❤️ : une erreur = une vie en moins (et sonné 1,5 s), à 0 tu es viré de l'usine. 30 secondes : celui qui en a trié le plus gagne (les virés passent derrière).",
   create(room) {
     const n = room.n, N = 400, STUN = 1500, DUR = 30000;
     const items = Array.from({ length: N }, () => {
@@ -536,18 +535,20 @@ GAMES.filter = {
       const [e, name] = pick(frame ? FRAMES : PARTS);
       return { e, n: name, f: frame };
     });
-    const pos = new Array(n).fill(0), stun = new Array(n).fill(0);
+    const pos = new Array(n).fill(0), stun = new Array(n).fill(0), lives = new Array(n).fill(3);
+    // les virés (0 vie) passent derrière ceux qui ont tenu jusqu'au bout
+    const score = (i) => (lives[i] > 0 ? 1000 : 0) + pos[i];
     const end = () => {
       const best = Math.max(...pos);
-      room.finish([...pos], range(n).sort((a, b) => pos[b] - pos[a]).map((i) => `${room.name(i)} ${pos[i]}`).join(' · ') + (best ? '' : ' — personne n\'a rien trié'));
+      room.finish(range(n).map(score), range(n).sort((a, b) => score(b) - score(a)).map((i) => `${room.name(i)} ${pos[i]}${lives[i] ? '' : ' 💀'}`).join(' · ') + (best ? '' : ' — personne n\'a rien trié'));
     };
     return {
       start() {
-        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n })), n: N, stun: STUN, ms: DUR });
+        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n, f: x.f ? 1 : 0 })), n: N, stun: STUN, ms: DUR, lives: 3 });
         room.later(end, DUR);
       },
       input(i, m) {
-        if (m.a !== 'sort' || pos[i] >= N || (m.b !== 0 && m.b !== 1)) return;
+        if (m.a !== 'sort' || pos[i] >= N || lives[i] <= 0 || (m.b !== 0 && m.b !== 1)) return;
         // le client prédit son tapis : s'il est décalé (tri refusé pendant qu'il était sonné), on le recale
         if (Number.isInteger(m.p) && m.p !== pos[i]) return room.send({ t: 'g', k: 'sync', p: pos[i] }, i);
         const now = Date.now();
@@ -560,7 +561,12 @@ GAMES.filter = {
         } else {
           // un peu de marge pour la latence : le client compte son étourdissement à partir de son clic
           stun[i] = now + STUN - 250;
-          room.send({ t: 'g', k: 'stun', i, ms: STUN });
+          lives[i]--;
+          room.send({ t: 'g', k: 'stun', i, ms: STUN, lives });
+          if (lives[i] <= 0) {
+            room.eliminate(i);
+            if (lives.every((l) => l <= 0)) room.later(end, 1500);
+          }
         }
       },
     };
@@ -856,14 +862,19 @@ GAMES.undercover = {
   intro: 7000,
   rules: (n) => (n === 2
     ? "Duel : chacun a un mot proche de celui de l'autre. À ton tour, donne UN SEUL mot d'indice, ou tente de deviner son mot (2 essais max). Attention, tes indices l'aident aussi à trouver le tien. Indice trop proche de ton mot = refusé."
-    : "Tout le monde a le même mot… sauf l'undercover, qui a un mot proche (et ne sait pas qu'il est undercover !). À ton tour, donne UN SEUL mot d'indice (trop proche de ton mot = refusé), puis tout le monde vote pour éliminer l'intrus. Jouez en vocal, et cachez votre mot si vous êtes dans la même pièce."),
+    : "Tout le monde a le même mot… sauf l'undercover, qui a un mot proche (et ne sait pas qu'il est undercover !). À partir de 6 joueurs, il y a aussi un Mr White 🎩 qui n'a AUCUN mot et doit bluffer ; s'il est éliminé, il a une chance de deviner le mot des civils pour gagner seul. À ton tour, donne UN SEUL mot d'indice, puis tout le monde vote pour éliminer un intrus. Les intrus gagnent s'ils sont aussi nombreux que les civils. Jouez en vocal !"),
   create(room) {
     const n = room.n;
     if (n === 2) return undercoverDuel(room);
     const pair = shuffle([...pick(UC_PAIRS)]);
-    const nu = n >= 9 ? 3 : n >= 6 ? 2 : 1;
-    const uc = new Set(shuffle(range(n)).slice(0, nu));
-    const word = (i) => (uc.has(i) ? pair[1] : pair[0]);
+    // répartition : ≤ 5 → 1 undercover · 6-7 → 1 undercover + Mr White · 8+ → 2 undercovers + Mr White
+    const nu = n >= 8 ? 2 : 1, nw = n >= 6 ? 1 : 0;
+    const roles = shuffle(range(n));
+    const uc = new Set(roles.slice(0, nu)), mw = new Set(roles.slice(nu, nu + nw));
+    const intrus = (i) => uc.has(i) || mw.has(i);
+    const word = (i) => (mw.has(i) ? '' : uc.has(i) ? pair[1] : pair[0]);
+    const roleOf = (i) => (mw.has(i) ? 'mrwhite' : uc.has(i) ? 'undercover' : 'civil');
+    let mwTimer = null;
     const alive = new Array(n).fill(true);
     let phase = 'idle', order = [], turn = 0, cycle = 0, turnTimer = null, voteTimer = null;
     let votes = new Map();
@@ -875,6 +886,8 @@ GAMES.undercover = {
       const a = aliveIdx();
       const s = (cycle - 1) % a.length;
       order = [...a.slice(s), ...a.slice(0, s)];
+      // Mr White ne parle jamais en premier (il n'a aucun indice pour s'inspirer)
+      if (order.length > 1 && mw.has(order[0])) order.push(order.shift());
       turn = 0;
       room.send({ t: 'g', k: 'cycle', cycle });
       nextTurn();
@@ -910,24 +923,47 @@ GAMES.undercover = {
       const cands = max === 0 ? aliveIdx() : range(n).filter((i) => tally[i] === max);
       const out = pick(cands);
       alive[out] = false;
-      const role = uc.has(out) ? 'undercover' : 'civil';
+      const role = roleOf(out);
       room.send({ t: 'g', k: 'out', i: out, role, tally, tie: cands.length > 1 }); // le mot n'est révélé qu'à la fin
       room.eliminate(out, { role });
-      const ucAlive = aliveIdx().filter((i) => uc.has(i)).length;
-      const civAlive = aliveIdx().length - ucAlive;
-      if (ucAlive === 0) return room.later(() => end('civ'), 4000);
-      if (ucAlive >= civAlive) return room.later(() => end('uc'), 4000);
+      // Mr White éliminé : une seule tentative pour deviner le mot des civils (30 s)
+      if (role === 'mrwhite') {
+        phase = 'mwguess';
+        room.later(() => {
+          room.send({ t: 'g', k: 'mwguess', i: out, ms: 30000 });
+          mwTimer = room.later(() => mwGuess(out, ''), 30000);
+        }, 2500);
+        return;
+      }
+      afterOut();
+    }
+    function afterOut() {
+      const inAlive = aliveIdx().filter(intrus).length;
+      const civAlive = aliveIdx().length - inAlive;
+      if (inAlive === 0) return room.later(() => end('civ'), 4000);
+      if (inAlive >= civAlive) return room.later(() => end('uc'), 4000);
       room.later(cycleStart, 5000);
     }
+    function mwGuess(i, text) {
+      if (phase !== 'mwguess') return;
+      room.cancel(mwTimer);
+      phase = 'reveal';
+      const ok = !!text && sameWord(text, pair[0]);
+      room.send({ t: 'g', k: 'mwres', i, text: text || '… (rien)', ok });
+      if (ok) return room.later(() => end('mw'), 3000);
+      room.later(afterOut, 2500);
+    }
     function end(w) {
-      const sc = range(n).map((i) => ((w === 'uc') === uc.has(i) ? 1 : 0));
-      const names = [...uc].map((i) => room.name(i)).join(' & ');
-      room.finish(sc, `${w === 'uc' ? 'Victoire des undercovers' : 'Victoire des civils'} ! Mot civil : « ${pair[0]} » · Mot undercover : « ${pair[1]} » (${names})`);
+      // civ : les civils gagnent · uc : tous les intrus (undercovers + Mr White) · mw : Mr White seul
+      const sc = range(n).map((i) => (w === 'civ' ? !intrus(i) : w === 'uc' ? intrus(i) : mw.has(i)) ? 1 : 0);
+      const names = (set) => [...set].map((i) => room.name(i)).join(' & ');
+      const head = w === 'mw' ? `🎩 Mr White (${names(mw)}) a deviné le mot et gagne seul` : w === 'uc' ? 'Victoire des intrus' : 'Victoire des civils';
+      room.finish(sc, `${head} ! Mot civil : « ${pair[0]} » · Mot undercover : « ${pair[1]} » (${names(uc)})${nw ? ` · Mr White : ${names(mw)}` : ''}`);
     }
 
     return {
       start() {
-        range(n).forEach((i) => room.send({ t: 'g', k: 'word', word: word(i), nu }, i));
+        range(n).forEach((i) => room.send({ t: 'g', k: 'word', word: word(i), nu, nw, mw: mw.has(i) }, i));
         room.later(cycleStart, 5000);
       },
       input(i, m) {
@@ -938,6 +974,8 @@ GAMES.undercover = {
           const bad = clueProblem(text, word(i));
           if (bad) return room.send({ t: 'g', k: 'nope', msg: bad }, i);
           giveClue(i, text);
+        } else if (m.a === 'mwguess') {
+          if (phase === 'mwguess' && mw.has(i)) mwGuess(i, String(m.text || '').trim().slice(0, 30));
         } else if (m.a === 'vote') {
           const target = m.target | 0;
           if (phase !== 'vote' || !alive[i] || !alive[target] || target === i) return;
@@ -972,7 +1010,7 @@ function clueProblem(text, word) {
   if (text.trim().length > 16) return 'Mot trop long (16 lettres max).';
   const a = norm(text);
   if (a.length < 2) return 'Indice trop court.';
-  const parts = [norm(word), ...word.split(/[\s'’-]+/).map(norm)].filter((w) => w.length >= 3);
+  const parts = word ? [norm(word), ...word.split(/[\s'’-]+/).map(norm)].filter((w) => w.length >= 3) : []; // Mr White n'a pas de mot
   for (const w of parts) {
     if (a.includes(w) || w.includes(a)) return 'Interdit : ça contient ton mot (ou l\'inverse) !';
     let pre = 0; while (pre < a.length && pre < w.length && a[pre] === w[pre]) pre++;
@@ -1266,21 +1304,24 @@ function buildTrack() {
   const boost = () => { const side = ri(1, 2), at = segs.length - ri(8, 20); for (let k = at; k < at + 4; k++) if (segs[k]) segs[k].b = side; };
   // obstacles (cônes) : x = position sur la largeur de la route (-1 bord gauche, 1 bord droit)
   const obs = [];
-  const cone = (k, x) => { if (segs[k] && !segs[k].b) obs.push([k, x]); };
+  // obstacle = [segment, x, type, phase] · type 0 = cône fixe, 1 = gosse qui traverse (x varie avec le temps)
+  const cone = (k, x) => { if (segs[k] && !segs[k].b) obs.push([k, x, 0, 0]); };
+  const kid = (k) => { if (segs[k] && !segs[k].b) obs.push([k, 0, 1, +(Math.random() * 6.28).toFixed(2)]); };
   const slalom = (from, len) => { let side = pick([-1, 1]); for (let k = from; k < from + len; k += 14) { cone(k, side * 0.5); side = -side; } };
   const wall = (k) => { const side = pick([-1, 1]); [0.2, 0.5, 0.8].forEach((x) => cone(k, side * x)); }; // bloque une moitié
   add(0, 40, 0, 0, 0);
   while (segs.length < 1550) {
     const L = pick([25, 40, 50]), dir = pick([-1, 1]), at = segs.length;
-    switch (ri(0, 8)) {
+    switch (ri(0, 9)) {
       case 0: add(10, L, 10, 0, 0); boost(); slalom(at + 6, L - 10); break;                 // ligne droite : turbo + slalom
+      case 9: add(10, L, 10, 0, 0); kid(at + 10 + ri(0, L - 10)); break;                    // ligne droite : un gosse traverse
       case 1: add(L / 2, L, L / 2, dir * ri(3, 5), pick([0, 0, 20, -20])); cone(at + L, -dir * 0.6); break; // virage + cône à l'extérieur
       case 2: add(L / 2, L / 2, L / 2, dir * ri(5, 6), 0); break;                            // épingle
       case 3: add(15, 15, 15, dir * 4, 0); add(15, 15, 15, -dir * 4, 0); break;              // S serré
       case 4: add(10, 8, 10, dir * 5, 0); add(10, 8, 10, -dir * 5, 0); add(10, 8, 10, dir * 5, 0); break; // chicane
       case 5: add(L, 0, L, 0, pick([30, -30, 50])); wall(at + L); add(L, 0, L, 0, pick([-30, 30, -50])); break; // bosse + mur caché derrière
       case 6: add(L / 2, L / 2, L / 2, dir * 6, 0); add(L / 2, L / 2, L / 2, dir * 5, 0); break; // double épingle (demi-tour)
-      case 7: add(10, 30, 10, 0, 0); wall(at + 15); wall(at + 35); break;                    // deux murs en quinconce
+      case 7: add(10, 30, 10, 0, 0); wall(at + 15); wall(at + 35); kid(at + 45); break;      // deux murs en quinconce + un gosse
       default: add(20, 30, 20, dir * ri(2, 4), pick([40, -40])); boost(); break;
     }
   }
@@ -1288,6 +1329,9 @@ function buildTrack() {
   // pas d'obstacle au départ ni dans la dernière ligne droite
   return { segs, obs: obs.filter(([k]) => k > 50 && k < segs.length - 70).sort((a, b) => a[0] - b[0]) };
 }
+
+// position d'un gosse sur la largeur de la route : il traverse d'un trottoir à l'autre (même formule côté client)
+const kidX = (time, ph) => 0.9 * Math.sin(time * 1.3 + ph);
 
 GAMES.circuit = {
   team: { rule: "En équipe : les places s'additionnent (1er = le plus de points). Un coéquipier dernier fait perdre l'équipe !", sum: true },
@@ -1297,7 +1341,7 @@ GAMES.circuit = {
   desc: 'Course en vue pilote, au chrono',
   title: 'Circuit',
   min: 2,
-  rules: "Course en vue pilote. Dans les virages la voiture part vers l'extérieur : braque AVANT. L'herbe te ralentit énormément et les obstacles 🚧 te stoppent net. Les flèches jaunes au sol = TURBO. Les autres voitures sont des fantômes. Premier à la ligne d'arrivée gagne.",
+  rules: "Course en vue pilote. Dans les virages la voiture part vers l'extérieur : braque AVANT. L'herbe te ralentit énormément, les cônes 🚧 te freinent et les gosses 🧒 qui traversent t'arrêtent net (et c'est pas joli). Les flèches jaunes au sol = TURBO. Les autres voitures sont des fantômes. Premier à la ligne d'arrivée gagne.",
   create(room) {
     const n = room.n, DT = 1 / 30;
     const { segs: track, obs } = buildTrack(), LEN = track.length * RSEG - RSEG * 30;
@@ -1331,13 +1375,14 @@ GAMES.circuit = {
         const z0 = p.z;
         p.z += p.sp * DT;
         // obstacle franchi pendant ce pas et assez proche sur la largeur = choc
-        for (const [k, ox] of obs) {
+        for (const [k, ox, type, ph] of obs) {
           const oz = k * RSEG + RSEG / 2;
           if (oz > p.z) break;
-          if (oz > z0 && Math.abs(p.x - ox) < 0.3) {
-            p.sp *= 0.2; p.boost = 0;
-            room.send({ t: 'g', k: 'crash', i });
-          }
+          if (oz <= z0) continue;
+          const x = type === 1 ? kidX(t - GO, ph) : ox;
+          if (Math.abs(p.x - x) >= (type === 1 ? 0.25 : 0.3)) continue;
+          if (type === 1) { p.sp = 0; p.boost = 0; room.send({ t: 'g', k: 'splat', i }); } // le gosse : arrêt net
+          else { p.sp *= 0.2; p.boost = 0; room.send({ t: 'g', k: 'crash', i }); }
         }
         if (p.z >= LEN) { p.time = t - GO; room.send({ t: 'g', k: 'fin', i, tm: +p.time.toFixed(2) }); race.finish(i, end); }
       });
@@ -1554,7 +1599,7 @@ GAMES.mines2 = {
   desc: 'Démine la même grille plus vite que les autres',
   title: 'Déminage',
   min: 2,
-  rules: "Tout le monde a la même grille de 32 mines. Le chiffre d'une case = nombre de mines autour d'elle. Une mine = tu es sonné 4 s. Premier à tout ouvrir gagne, sinon le plus avancé au bout de 2 min 30.",
+  rules: "Tout le monde a la même grille de 32 mines. Le chiffre d'une case = nombre de mines autour d'elle. Une mine = tu es sonné 4 s. Le premier qui a tout ouvert termine la manche et gagne ; sinon le plus avancé au bout de 2 min 30.",
   create(room) {
     const n = room.n, W = 16, H = 12, NM = 32, STUN = 4000;
     const nb = (c) => { const x = c % W, y = Math.floor(c / W), o = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if ((dx || dy) && X >= 0 && Y >= 0 && X < W && Y < H) o.push(Y * W + X); } return o; };
@@ -1601,7 +1646,7 @@ GAMES.mines2 = {
           const out = [];
           flood(i, c, out);
           room.send({ t: 'g', k: 'open', cells: out }, i);
-          if (rev[i].size >= SAFE) race.finish(i, end);
+          if (rev[i].size >= SAFE) { race.finish(i, end); end(); } // premier à finir = fin de la manche pour tous
         }
         room.send({ t: 'g', k: 'prog', p: pct(), b: booms });
       },

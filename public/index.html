@@ -312,6 +312,10 @@
   .chist .cdot { width: 32px; height: 32px; }
   .teamrule { max-width: 520px; margin: 10px auto 0; padding: 8px 12px; border-radius: 14px; background: #dff6ff; border: 2.5px solid var(--line); font-weight: 800; font-size: 15px; text-align: left; }
   .gcard.noteam { opacity: .4; cursor: not-allowed; }
+  .brow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 12px; background: #fff; border: 2px solid var(--line); margin-top: 6px; font-size: 14px; flex-wrap: wrap; }
+  .brow .rk { font-family: var(--display); width: 26px; text-align: center; }
+  .brow .grow { flex: 1; }
+  .brow .when { color: var(--mut); font-size: 12px; white-space: nowrap; }
   /* chat du salon (en bas à gauche, le son est en bas à droite) */
   #chat { position: fixed; left: 14px; bottom: 14px; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: min(360px, calc(100vw - 90px)); }
   #chatBtn { position: relative; font-size: 22px; padding: 8px 12px; }
@@ -506,6 +510,11 @@
           <button id="btnGames" class="btn white sm" style="width:100%;margin-top:6px" type="button">📖 Les mini-jeux et leurs règles</button>
         </div>
         <div class="card hidden" id="friendsHome" style="margin-top:18px"></div>
+        <div class="card" id="boardCard" style="margin-top:18px">
+          <div class="lbl">🏆 Classement</div>
+          <div class="tabs"><button class="tab on" data-board="recent" type="button">Derniers gagnants</button><button class="tab" data-board="top" type="button">Top victoires</button></div>
+          <div id="boardBody"><p class="mut">Chargement…</p></div>
+        </div>
       </div>
     </div>
   </section>

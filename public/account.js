@@ -71,6 +71,10 @@ function onAccountMsg(m) {
     case 'info':
       toast(esc(m.msg));
       break;
+    case 'board':
+      boardData = m;
+      renderBoard();
+      break;
     case 'xp':
       showXp(m);
       break;
@@ -291,6 +295,37 @@ $('#friendsLobby').addEventListener('click', friendsClick);
   if (e.key === 'Enter' && e.target.classList.contains('fadd')) e.currentTarget.querySelector('[data-fa="add"]').click();
 }));
 $('#btnCustomLobby').onclick = openCustom;
+
+// ════════════════ classement (accueil) : derniers gagnants + top victoires ════════════════
+let boardData = null, boardTab = 'recent';
+function ago(t) {
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return 'à l\'instant';
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  return `il y a ${Math.floor(s / 86400)} j`;
+}
+function renderBoard() {
+  const el = $('#boardBody'); if (!el || !boardData) return;
+  if (boardTab === 'recent') {
+    el.innerHTML = boardData.recent.length
+      ? boardData.recent.map((r) => `<div class="brow"><span>🏆</span><span class="grow">${r.who.map((w) => pillRaw(w, '#ffd23f')).join(' ')}</span>
+          <span class="when">${esc(r.mode)} · ${r.n} joueurs · ${ago(r.at)}</span></div>`).join('')
+      : '<p class="mut">Aucune partie terminée pour l\'instant. À vous de jouer !</p>';
+  } else {
+    el.innerHTML = boardData.top.length
+      ? boardData.top.map((u, k) => `<div class="brow"><span class="rk">${['🥇', '🥈', '🥉'][k] || k + 1}</span><span class="grow">${pillRaw(u, '#3dd6ff')}</span>
+          <span class="when"><b>${u.wins}</b> victoire${u.wins > 1 ? 's' : ''} · ${u.matches} partie${u.matches > 1 ? 's' : ''}</span></div>`).join('')
+      : '<p class="mut">Personne n\'a encore gagné de partie avec un compte.</p>';
+  }
+}
+$('#boardCard').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-board]'); if (!b) return;
+  boardTab = b.dataset.board;
+  document.querySelectorAll('#boardCard .tab').forEach((x) => x.classList.toggle('on', x === b));
+  renderBoard();
+});
+setInterval(renderBoard, 60000); // « il y a 3 min » reste juste
 
 // ════════════════ œil : afficher le mot de passe en le tapant ════════════════
 document.querySelectorAll('input[type="password"]').forEach((inp) => {

@@ -89,6 +89,21 @@ function presenceChanged(uid) {
   u.friends.forEach(pushFriends);
 }
 
+// ═════════════════ classement général (accueil) ═════════════════
+// top 10 des comptes aux victoires (puis à l'XP) + derniers vainqueurs
+function boardPayload() {
+  const top = [...store.users.values()]
+    .filter((u) => u.stats && u.stats.matches > 0)
+    .sort((a, b) => b.stats.wins - a.stats.wins || b.xp - a.xp)
+    .slice(0, 10)
+    .map((u) => ({ ...ACC.publicProfile(u), wins: u.stats.wins, matches: u.stats.matches }));
+  return { t: 'board', top, recent: store.meta.recent || [] };
+}
+function pushBoard() {
+  const s = JSON.stringify(boardPayload());
+  wss.clients.forEach((ws) => { if (ws.readyState === 1) ws.send(s); });
+}
+
 // ═════════════════ salons ═════════════════
 class Room {
   constructor(code) {
@@ -418,6 +433,10 @@ class Room {
       });
       const names = (sides) => sides.map((s) => (this.mode === '2v2' || this.mode === '3v3' ? TEAM_NAMES[s] : this.p[s].name)).join(' & ');
       this.lastResult = `🏆 ${names(winners)} ${winners.length > 1 ? 'gagnent' : 'gagne'} (${this.scores.join(' – ')})`;
+      // derniers vainqueurs (page d'accueil) : on garde les 15 derniers matchs, invités compris
+      const who = winners.flatMap((sd) => this.sides[sd]).map((i) => ({ name: this.p[i].name, avatar: this.p[i].avatar, frame: this.p[i].frame }));
+      store.setMeta('recent', [{ at: Date.now(), who, mode: MODES[this.mode].label, n: this.n, pts: best }, ...(store.meta.recent || [])].slice(0, 15));
+      pushBoard();
       this.state = 'lobby';
       this.p = null;
       this.broadcastRoom();
@@ -497,6 +516,7 @@ wss.on('connection', (ws) => {
       case 'hello': {
         // Render sans base de données : le disque est effacé à chaque déploiement, les comptes avec
         reply({ t: 'catalog', games: CATALOG, ephemeral: store.kind === 'file' && !!process.env.RENDER });
+        reply(boardPayload());
         const u = m.token ? ACC.readToken(m.token) : null;
         setUser(S, u);
         if (m.token && !u) reply({ t: 'tokenBad' });

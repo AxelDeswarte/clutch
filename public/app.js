@@ -3,6 +3,7 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ARROW = { up: '⬆', down: '⬇', left: '⬅', right: '➡' };
+const ZQSD = { up: 'Z', left: 'Q', down: 'S', right: 'D' }; // lettres affichées (AZERTY)
 // e.code = touche physique : KeyW/A/S/D = ZQSD sur AZERTY et WASD sur QWERTY
 const DIRK = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
 const isTouch = matchMedia('(pointer: coarse)').matches;
@@ -428,7 +429,7 @@ function onElim(m) {
   if (!M) return;
   if (replaying) { if (m.i === M.me) dead = true; return; }
   const name = P(m.i).name, color = P(m.i).color, other = P(m.o).name;
-  const extra = m.role ? (m.role === 'undercover' ? " — c'était l'UNDERCOVER 🕵️" : " — c'était un civil 😇") : '';
+  const extra = m.role ? (m.role === 'undercover' ? " — c'était l'UNDERCOVER 🕵️" : m.role === 'mrwhite' ? ' — c\'était MR WHITE 🎩' : " — c'était un civil 😇") : '';
   if (m.i === M.me) {
     dead = true;
     const L = $('#gagLayer');
@@ -627,13 +628,13 @@ function holdBtn(label, onDown, onUp) {
 GAMES.seq = {
   init() {
     $('#stage').innerHTML = `<div class="seq" id="seqMe"></div><div class="screen-dark" style="margin-top:14px"><canvas id="ec" width="800" height="380"></canvas></div>
-      <p class="sub">Flèches ou ZQSD — une erreur te fait glisser vers les lames</p>`;
+      <p class="sub">Tape la lettre affichée (Z Q S D, ou les flèches) — une erreur te fait glisser vers les lames</p>`;
     $('#stage').appendChild(dpad((d) => this.dir(d)));
     this.seq = []; this.idx = 0; this.S = {}; this.raf = null;
   },
   render() {
     const nx = this.seq.length ? range(6).map((k) => this.seq[(this.idx + k) % this.seq.length]) : [];
-    $('#seqMe').innerHTML = nx.map((d, k) => `<span class="key ${k === 0 ? 'cur' : ''}" style="${k ? `opacity:${1 - k * 0.14}` : ''}">${ARROW[d]}</span>`).join('');
+    $('#seqMe').innerHTML = nx.map((d, k) => `<span class="key ${k === 0 ? 'cur' : ''}" style="${k ? `opacity:${1 - k * 0.14}` : ''}">${ZQSD[d]}</span>`).join('');
   },
   msg(m) {
     if (m.k === 'esc') { this.seq = m.seq; this.top = m.top; this.render(); this.loop(); }
@@ -656,18 +657,19 @@ GAMES.seq = {
     const draw = () => {
       this.raf = requestAnimationFrame(draw);
       const S = this.S; if (!S.cur) return;
-      const a = alphaOf(S), A = S.prev.d, B = S.cur.d, TOP = this.top;
-      const y = (st) => H - 20 - (st / TOP) * (H - 50);
+      const a = alphaOf(S), A = S.prev.d, B = S.cur.d, WIN = this.top;
+      // la caméra monte avec le broyeur : il reste en bas de l'écran, on voit WIN marches au-dessus
+      const gc = lerp(A.c, B.c, a), base = Math.max(0, gc - 3);
+      const y = (st) => H - 20 - ((st - base) / WIN) * (H - 50);
       const lw = W / n;
       c.fillStyle = '#14102e'; c.fillRect(0, 0, W, H);
-      const cy = y(lerp(A.c, B.c, a));
+      const cy = y(gc);
       for (let i = 0; i < n; i++) {
         const x0 = i * lw;
         c.fillStyle = i % 2 ? '#221b4a' : '#2a2258'; c.fillRect(x0 + 4, 0, lw - 8, H);
         c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 2;
         const off = (performance.now() / 20) % 18;
         for (let yy = -18 + off; yy < H; yy += 18) { c.beginPath(); c.moveTo(x0 + 10, yy); c.lineTo(x0 + lw - 10, yy); c.stroke(); }
-        c.fillStyle = '#ffd23f'; c.fillRect(x0 + 4, y(TOP) - 4, lw - 8, 6);
       }
       // broyeur
       const g = c.createLinearGradient(0, cy, 0, H); g.addColorStop(0, '#ff4d6d'); g.addColorStop(1, '#5c0b1f');
@@ -677,11 +679,13 @@ GAMES.seq = {
       for (let x = -24 + sh; x < W; x += 24) { c.beginPath(); c.moveTo(x, cy); c.lineTo(x + 12, cy - 14); c.lineTo(x + 24, cy); c.fill(); }
       strokeText(c, '⚙️ BROYEUR ⚙️', W / 2, Math.min(H - 8, cy + 26), '#fff', 16);
       B.pos.forEach((p, i) => {
-        const x = i * lw + lw / 2, yy = y(lerp(A.pos[i], p, a));
-        if (!B.al[i]) { c.font = '26px serif'; c.textAlign = 'center'; c.fillText('🩸', x, Math.min(H - 10, yy)); return; }
+        const x = i * lw + lw / 2, st = lerp(A.pos[i], p, a), yy = Math.max(46, y(st));
+        strokeText(c, P(i).name, x, 16, P(i).color, n > 6 ? 11 : 13);
+        strokeText(c, `${Math.floor(p)} 🪜`, x, 32, '#fff', 11);
+        if (!B.al[i]) { c.font = '26px serif'; c.textAlign = 'center'; c.fillText('🩸', x, H - 10); return; }
         c.font = '30px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, x, yy);
+        if (y(st) < 46) strokeText(c, '▲', x, yy - 30, '#ffd23f', 14); // hors écran par le haut
         if (i === M.me) { c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x, yy - 10, 21, 0, 7); c.stroke(); }
-        strokeText(c, P(i).name, x, 16, P(i).color, 13);
       });
     };
     draw();
@@ -694,27 +698,32 @@ GAMES.filter = {
   init() {
     $('#stage').innerHTML = `<div class="sortkeys">
         <button class="btn sortbtn" data-b="0" style="background:#ff9f1c"><span class="k">⬅ ou Q</span>🔥 AU FOUR<small>la ferraille 🔩⚙️🔧</small></button>
-        <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>les tableaux 🖼️</small></button>
+        <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>les objets de valeur 🖼️🏺🎸</small></button>
       </div>
       <div class="ucturn" id="fnow" style="margin:0 0 8px">Le tapis démarre…</div><div class="tbar" style="margin-bottom:10px"><div id="fbar" style="width:0"></div></div>
       <div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${legend()}
       <p class="sub">40 secondes, tapis infini. Erreur = sonné 1,5 s.</p>`;
-    this.items = null; this.pos = 0; this.stunUntil = 0; this.anims = []; this.slideT = 0; this.raf = null;
+    this.items = null; this.pos = 0; this.stunUntil = 0; this.anims = []; this.slideT = 0; this.raf = null; this.out = false; this.cnt = [];
     $('#stage').querySelectorAll('.sortbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.sort(+b.dataset.b); }));
   },
   msg(m) {
     if (m.k === 'belt') {
-      this.items = m.items; this.N = m.n; this.stunMs = m.stun;
-      M.players.forEach((_, i) => legendSet(i, '0'));
+      this.items = m.items; this.N = m.n; this.stunMs = m.stun; this.lives = M.players.map(() => m.lives || 3);
+      M.players.forEach((_, i) => legendSet(i, '0 · ' + '❤️'.repeat(this.lives[i])));
       timerBar($('#fbar'), m.ms); this.status(); this.loop();
     }
     if (m.k === 'prog') {
-      m.pos.forEach((p, i) => legendSet(i, String(p)));
+      this.cnt = m.pos;
+      m.pos.forEach((p, i) => legendSet(i, `${p} · ${this.lives[i] > 0 ? '❤️'.repeat(this.lives[i]) : '💀'}`));
       if (m.pos[M.me] > this.pos) { this.pos = m.pos[M.me]; this.status(); }
     }
     // le serveur a refusé un tri : on recale le tapis sur sa position
     if (m.k === 'sync') { this.pos = m.p; this.anims = []; this.status(); }
-    if (m.k === 'stun' && m.i === M.me && performance.now() > this.stunUntil) this.stunUntil = performance.now() + m.ms;
+    if (m.k === 'stun') {
+      if (m.lives) { this.lives = m.lives; const c = this.cnt || []; M.players.forEach((_, i) => legendSet(i, `${c[i] || 0} · ${this.lives[i] > 0 ? '❤️'.repeat(this.lives[i]) : '💀'}`)); }
+      if (m.i === M.me && performance.now() > this.stunUntil) this.stunUntil = performance.now() + m.ms;
+      if (m.i === M.me && this.lives[M.me] <= 0) { this.out = true; $('#fnow').textContent = '💀 Viré de l\'usine ! Tu regardes la fin.'; }
+    }
   },
   key(e) {
     if (e.repeat) return;
@@ -726,12 +735,12 @@ GAMES.filter = {
     el.textContent = this.pos >= this.N ? '🏁 Tout trié !' : `Trié : ${this.pos} · ${this.items[this.pos].e} ${this.items[this.pos].n}`;
   },
   sort(b) {
-    if (!this.items || !active || dead || this.pos >= this.N) return;
+    if (!this.items || !active || dead || this.out || this.pos >= this.N) return;
     const now = performance.now();
     if (now < this.stunUntil) { shake($('#fc')); return; }
     send({ t: 'input', a: 'sort', b, p: this.pos });
     const it = this.items[this.pos];
-    const want = it.e === '🖼️' ? 1 : 0;
+    const want = it.f ? 1 : 0;
     if (b === want) {
       this.anims.push({ e: it.e, b, t: now });
       this.pos++; this.slideT = now;
@@ -1427,10 +1436,10 @@ GAMES.undercover = {
     const n = M.players.length;
     this.alive = range(n).map(() => true); this.said = range(n).map(() => []); this.roles = {};
     this.phase = 'idle'; this.speaking = null; this.voted = new Set(); this.myVote = null; this.tally = null; this.duel = false; this.lives = [2, 2];
-    const go = (a) => { const v = $('#ucclue').value.trim(); if (v) send({ t: 'input', a, text: v }); };
+    const go = (a) => { const v = $('#ucclue').value.trim(); if (v) send({ t: 'input', a: a === 'guess' && this.phase === 'mwguess' ? 'mwguess' : a, text: v }); };
     $('#ucsend').onclick = () => go('clue');
     $('#ucguess').onclick = () => go('guess');
-    $('#ucclue').addEventListener('keydown', (e) => { if (e.key === 'Enter') go('clue'); });
+    $('#ucclue').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(this.phase === 'mwguess' ? 'guess' : 'clue'); });
     $('#ucl').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-v]'); if (!b || this.phase !== 'vote') return;
       this.myVote = +b.dataset.v; send({ t: 'input', a: 'vote', target: this.myVote }); this.render();
@@ -1441,10 +1450,13 @@ GAMES.undercover = {
     switch (m.k) {
       case 'word':
         this.duel = !!m.duel;
-        this.word = m.word;
+        this.word = m.mw ? '🎩 Mr White' : m.word;
+        this.mw = !!m.mw;
+        const cast = `${m.nu > 1 ? m.nu + ' undercovers' : '1 undercover'}${m.nw ? ' + 1 Mr White 🎩' : ''}`;
         this.wordNote = this.duel
           ? "Ton adversaire a un mot proche du tien. Trouve-le avant qu'il trouve le tien !"
-          : `${m.nu > 1 ? m.nu + ' undercovers' : '1 undercover'} dans la partie… c'est peut-être toi 😏`;
+          : m.mw ? `Tu n'as AUCUN mot : écoute les autres et bluffe ! Si on t'élimine, tu pourras deviner le mot des civils. (${cast})`
+            : `${cast} dans la partie… c'est peut-être toi 😏`;
         this.renderWord();
         $('#uct').textContent = 'Lisez bien vos mots…';
         $('#ucsub').textContent = this.duel ? 'À ton tour : un indice OU une tentative (2 essais max). Attention, tes indices l\'aident aussi !' : 'Débattez en vocal avant de voter !';
@@ -1476,6 +1488,24 @@ GAMES.undercover = {
       case 'nope':
         $('#uct').textContent = '⛔ ' + m.msg; shake($('#ucin')); SFX.play('bad');
         break;
+      case 'mwguess':
+        // Mr White éliminé : il tente de deviner le mot des civils
+        this.phase = 'mwguess';
+        timerBar($('#ucbar'), m.ms);
+        if (m.i === M.me) {
+          $('#uct').textContent = '🎩 Dernière chance : devine le mot des civils !';
+          $('#ucin').classList.remove('hidden'); $('#ucsend').classList.add('hidden'); $('#ucguess').classList.remove('hidden');
+          $('#ucclue').value = ''; $('#ucclue').placeholder = 'Le mot des civils…'; $('#ucclue').focus(); SFX.play('ding');
+        } else $('#uct').innerHTML = `🎩 ${pill(m.i)} était Mr White ! Il tente de deviner votre mot…`;
+        break;
+      case 'mwres':
+        this.phase = 'reveal';
+        $('#ucin').classList.add('hidden'); $('#ucsend').classList.remove('hidden'); $('#ucguess').classList.toggle('hidden', !this.duel);
+        $('#ucclue').placeholder = 'Un seul mot…';
+        this.said[m.i].push({ t: '🎯 ' + m.text, c: m.ok ? 'good' : 'bad' });
+        $('#uct').innerHTML = m.ok ? `🎩 ${pill(m.i)} a trouvé le mot ! Mr White gagne seul.` : `🎩 ${pill(m.i)} se plante : « ${esc(m.text)} »`;
+        SFX.play(m.ok ? 'win' : 'bad'); this.render();
+        break;
       case 'vote':
         this.phase = 'vote'; this.speaking = null; this.voted = new Set(); this.myVote = null;
         $('#uct').textContent = this.alive[M.me] ? "🗳️ Votez pour éliminer l'intrus !" : '🗳️ Les survivants votent…';
@@ -1486,7 +1516,7 @@ GAMES.undercover = {
       case 'voted': this.voted = new Set(m.who); this.render(); break;
       case 'out':
         this.phase = 'reveal'; this.alive[m.i] = false; this.roles[m.i] = m; this.tally = m.tally;
-        $('#uct').innerHTML = `${pill(m.i)} est éliminé·e${m.tie ? ' (égalité → tirage au sort)' : ''} : ${m.role === 'undercover' ? '🕵️ UNDERCOVER !' : '😇 civil'}`;
+        $('#uct').innerHTML = `${pill(m.i)} est éliminé·e${m.tie ? ' (égalité → tirage au sort)' : ''} : ${m.role === 'undercover' ? '🕵️ UNDERCOVER !' : m.role === 'mrwhite' ? '🎩 MR WHITE !' : '😇 civil'}`;
         timerBar($('#ucbar'), 1);
         this.render();
         break;
@@ -1509,7 +1539,7 @@ GAMES.undercover = {
       const role = this.roles[i];
       let right = '';
       if (this.duel) right = `<span class="lives">${'❤️'.repeat(Math.max(0, this.lives[i]))}${'🖤'.repeat(Math.max(0, 2 - this.lives[i]))}</span>`;
-      else if (role) right = role.role === 'undercover' ? '🕵️' : '😇';
+      else if (role) right = role.role === 'undercover' ? '🕵️' : role.role === 'mrwhite' ? '🎩' : '😇';
       else if (canVote && i !== M.me && this.alive[i]) right = `<button class="btn sm ${this.myVote === i ? 'pink' : 'white'}" data-v="${i}">${this.myVote === i ? '✔ Voté' : '👉 Lui !'}</button>`;
       if (this.tally && this.tally[i]) right += ` <span class="mut">${this.tally[i]} vote${this.tally[i] > 1 ? 's' : ''}</span>`;
       if (this.phase === 'vote' && this.voted.has(i)) right += ' 🗳️';
@@ -1718,6 +1748,7 @@ function drawGo(c, W, H, B, g) {
 }
 
 // ── Circuit (vue pilote, route pseudo-3D) ──
+const kidX = (time, ph) => 0.9 * Math.sin(time * 1.3 + ph); // même formule que le serveur
 const DRIVEK = { ArrowUp: 'gas', KeyW: 'gas', ArrowDown: 'brake', KeyS: 'brake', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 function drawCar(c, cx, by, w, color, avatar, tilt = 0) {
   const h = w * 0.42;
@@ -1758,7 +1789,7 @@ GAMES.circuit = {
     if (m.k === 'track') {
       this.SEG = m.seg; this.MAX = m.max; this.LEN = m.len;
       this.segs = m.s.map(([c, y, b], i) => ({ c, y1: i ? m.s[i - 1][1] : 0, y2: y, b }));
-      this.obs = m.o || [];
+      this.obs = m.o || []; this.hitKids = new Set(); this.splatT = 0;
       M.players.forEach((_, i) => legendSet(i, ''));
       // après un refresh, le serveur garde les dernières touches reçues : on repart pédales relâchées
       if (replaying) { this.last = 'reset'; this.sendDrive(); }
@@ -1767,6 +1798,16 @@ GAMES.circuit = {
     if (m.k === 's') { goTrack(this, m); pushSnap(this.S, m); }
     if (m.k === 'boost' && m.i === M.me) SFX.play('whoosh');
     if (m.k === 'crash' && m.i === M.me) { this.crashT = performance.now(); SFX.play('bonk'); }
+    if (m.k === 'splat' && m.i === M.me && this.S.cur) {
+      // le gosse le plus proche devant/sous la voiture devient une flaque, et l'écran se couvre de sang
+      const z = this.S.cur.d.p[M.me][0];
+      let best = -1, bd = Infinity;
+      this.obs.forEach(([k, , type], q) => { if (type === 1 && !this.hitKids.has(q)) { const d = Math.abs(k * this.SEG - z); if (d < bd) { bd = d; best = q; } } });
+      if (best >= 0) this.hitKids.add(best);
+      this.splatT = performance.now();
+      this.splats = range(14).map(() => ({ x: Math.random() * 800, y: Math.random() * 450, r: 30 + Math.random() * 90, d: 20 + Math.random() * 120 }));
+      if (!replaying) { SFX.play('boom'); SFX.play('bad'); }
+    }
     if (m.k === 'fin') { this.done.add(m.i); legendSet(m.i, `🏁 ${m.tm.toFixed(2)} s`); SFX.play(m.i === M.me ? 'win' : 'ding'); }
   },
   loop() {
@@ -1830,11 +1871,22 @@ GAMES.circuit = {
         maxy = p2.y;
       }
       // cônes, du plus loin au plus proche (masqués derrière les bosses comme les voitures)
+      const tm = lerp(S.prev.d.tm || 0, S.cur.d.tm || 0, a);
       for (let q = this.obs.length - 1; q >= 0; q--) {
-        const [k, ox] = this.obs[q], v = vis.get(k); if (!v) continue;
+        const [k, ox0, type, ph] = this.obs[q], v = vis.get(k); if (!v) continue;
+        const ox = type === 1 ? kidX(tm, ph) : ox0;
         const s = lerp(v.p1.s, v.p2.s, 0.5), w = s * 300 * W / 2, h = w * 1.15;
         if (w < 2) continue;
         const sx = lerp(v.p1.x, v.p2.x, 0.5) + s * ox * RW * W / 2, sy = lerp(v.p1.y, v.p2.y, 0.5);
+        if (type === 1) {
+          // un gosse qui traverse (ou ce qu'il en reste)
+          c.save(); c.beginPath(); c.rect(0, 0, W, v.clip); c.clip();
+          c.textAlign = 'center'; c.fillStyle = '#000';
+          if (this.hitKids.has(q)) { c.fillStyle = 'rgba(160,0,20,.85)'; c.beginPath(); c.ellipse(sx, sy - 2, w * 0.9, w * 0.25, 0, 0, 7); c.fill(); }
+          else { c.font = Math.round(w * 1.5) + 'px ' + EMOJI_FONT; c.fillText('🧒', sx, sy - w * 0.1 - Math.abs(Math.sin(tm * 9)) * w * 0.15); }
+          c.restore();
+          continue;
+        }
         c.save(); c.beginPath(); c.rect(0, 0, W, v.clip); c.clip();
         c.fillStyle = '#1b1440'; c.fillRect(sx - w * 0.6, sy - h * 0.12, w * 1.2, h * 0.12);
         c.fillStyle = '#ff7a1a'; c.beginPath(); c.moveTo(sx - w / 2, sy - h * 0.1); c.lineTo(sx, sy - h); c.lineTo(sx + w / 2, sy - h * 0.1); c.closePath(); c.fill();
@@ -1865,6 +1917,19 @@ GAMES.circuit = {
       strokeText(c, `${Math.round((sp / this.MAX) * 280)} km/h`, 80, H - 20, B[me][4] ? '#ff9f1c' : '#fff', 24);
       if (Math.abs(plx) > 1 && !this.done.has(me)) strokeText(c, '🌿 HORS PISTE', W / 2, 90, '#ff4d6d', 22);
       if (this.crashT && performance.now() - this.crashT < 900) strokeText(c, '💥 AÏE ! Un cône…', W / 2, 140, '#ff9f1c', 32);
+      // écran plein de sang après un gosse : opaque 1,2 s puis ça s'efface sur 1,6 s
+      const st = this.splatT ? (performance.now() - this.splatT) / 1000 : 9;
+      if (st < 2.8) {
+        c.save(); c.globalAlpha = st < 1.2 ? 1 : 1 - (st - 1.2) / 1.6;
+        c.fillStyle = 'rgba(120,0,15,.55)'; c.fillRect(0, 0, W, H);
+        this.splats.forEach((b) => {
+          c.fillStyle = '#9e0016'; c.beginPath(); c.arc(b.x, b.y, b.r, 0, 7); c.fill();
+          c.fillRect(b.x - b.r * 0.15, b.y, b.r * 0.3, b.d + st * 60); // coulures
+          c.beginPath(); c.arc(b.x, b.y + b.d + st * 60, b.r * 0.15, 0, 7); c.fill();
+        });
+        strokeText(c, '😱 OUPS…', W / 2, H / 2, '#fff', 48);
+        c.restore();
+      }
       if (this.done.has(me)) strokeText(c, '🏁 ARRIVÉ !', W / 2, 120, '#2ee59d', 40);
       c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(150, 12, W - 300, 8);
       B.forEach((p, i) => { c.fillStyle = P(i).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2; c.beginPath(); c.arc(150 + (W - 300) * Math.min(1, p[0] / this.LEN), 16, i === me ? 8 : 6, 0, 7); c.fill(); c.stroke(); });
@@ -1948,11 +2013,16 @@ GAMES.snake = {
       this.C = Math.floor(Math.min(820 / m.w, 520 / m.h));
       const cv = $('#snc'); cv.width = m.w * this.C; cv.height = m.h * this.C;
       M.players.forEach((_, i) => legendSet(i, String(m.b[i].length)));
+      this.prev = null; this.tMsg = 0;
       this.loop();
     }
     if (m.k === 's') {
       if (!this.started) this.started = true;
       const ate = m.b.some((b, i) => b.length > (this.b[i] || []).length && b.length);
+      // on garde l'état précédent pour glisser de l'un à l'autre pendant la durée d'un pas
+      const now = performance.now();
+      if (this.tMsg) this.step = Math.max(70, Math.min(200, lerp(this.step || 115, now - this.tMsg, 0.3)));
+      this.prev = this.b; this.tMsg = now;
       this.b = m.b; this.f = m.f;
       m.b.forEach((b, i) => legendSet(i, b.length ? String(b.length) : '💀'));
       if (m.d.length) SFX.play('boom'); else if (ate) SFX.play('ok');
@@ -1969,16 +2039,25 @@ GAMES.snake = {
       // les emojis prennent l'opacité de fillStyle : on repart d'une couleur opaque
       c.font = Math.round(C * 0.9) + 'px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillStyle = '#000';
       this.f.forEach((f) => c.fillText('🍎', (f % W) * C + C / 2, Math.floor(f / W) * C + C * 0.82));
+      // rendu fluide : la tête glisse de son ancienne case vers la nouvelle (et la queue suit),
+      // le corps est un trait épais qui passe par le centre des cases
+      const a = this.tMsg ? Math.min(1, (now - this.tMsg) / (this.step || 115)) : 1;
+      const cen = (cell) => [(cell % W) * C + C / 2, Math.floor(cell / W) * C + C / 2];
+      const mix = (p, q) => [lerp(p[0], q[0], a), lerp(p[1], q[1], a)];
+      c.lineCap = 'round'; c.lineJoin = 'round';
       this.b.forEach((body, i) => {
         if (!body.length) return;
-        const col = P(i).color;
-        body.slice().reverse().forEach((cell, k) => {
-          const x = (cell % W) * C, y = Math.floor(cell / W) * C, head = k === body.length - 1;
-          c.fillStyle = col; c.strokeStyle = '#1b1440'; c.lineWidth = 2;
-          c.beginPath(); c.roundRect(x + 1, y + 1, C - 2, C - 2, head ? C * 0.45 : C * 0.25); c.fill(); c.stroke();
-          if (!head && k % 2) { c.fillStyle = 'rgba(255,255,255,.25)'; c.fillRect(x + C * 0.3, y + C * 0.3, C * 0.4, C * 0.4); }
-        });
-        const h = body[0], hx = (h % W) * C + C / 2, hy = Math.floor(h / W) * C + C / 2;
+        const prev = (this.prev && this.prev[i] && this.prev[i].length) ? this.prev[i] : body;
+        const head = mix(cen(prev[0]), cen(body[0]));
+        const grew = body.length > prev.length;
+        const tail = grew ? cen(body[body.length - 1]) : mix(cen(prev[prev.length - 1]), cen(body[body.length - 1]));
+        const pts = [head, ...body.slice(1, -1).map(cen), tail];
+        const path = () => { c.beginPath(); pts.forEach(([x, y], k) => (k ? c.lineTo(x, y) : c.moveTo(x, y))); };
+        path(); c.strokeStyle = '#1b1440'; c.lineWidth = C * 0.82 + 4; c.stroke();
+        path(); c.strokeStyle = P(i).color; c.lineWidth = C * 0.82; c.stroke();
+        path(); c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = C * 0.22; c.setLineDash([C * 0.3, C * 0.7]); c.stroke(); c.setLineDash([]);
+        const [hx, hy] = head;
+        c.fillStyle = P(i).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5; c.beginPath(); c.arc(hx, hy, C * 0.58, 0, 7); c.fill(); c.stroke();
         c.font = Math.round(C * 0.85) + 'px ' + EMOJI_FONT; c.fillStyle = '#000'; c.fillText(P(i).avatar, hx, hy + C * 0.3);
         if (i === M.me) {
           c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(hx, hy, C * (1 + 0.2 * Math.sin(now / 120)), 0, 7); c.stroke();

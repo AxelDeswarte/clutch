@@ -17,30 +17,31 @@ Chaque manche rapporte 1 point à son gagnant (ou à son équipe), 0 aux autres.
 égalité en tête aux points = on continue. Déminage et Undercover sont décochés par défaut.
 
 Un chat de salon est dispo partout (salle d'attente et parties), avec l'historique des 40 derniers messages.
+L'accueil affiche un classement : les derniers gagnants (invités compris) et le top 10 des comptes aux victoires.
 
 **Mini-jeux** (plusieurs inspirés de Machine Party)
 | Jeu | Principe |
 |---|---|
 | 🤠 Duel au soleil | dégainer au signal, pas avant |
-| 🛗 Escalator | taper les flèches pour monter, un broyeur remonte derrière |
+| 🛗 Escalator | taper Z Q S D pour monter un escalator sans fin, le broyeur accélère : dernier survivant |
 | 🏍️ Tron | coincer les autres avec son trait |
 | 🧠 Mémoire | recliquer les cases allumées, une de plus par niveau |
 | 🪚 Lames | esquiver scies circulaires et lasers rotatifs |
 | 🏃 Course de haies | alterner ← → et sauter au bon moment |
-| 🔥 Le Filtre | 30 s de tapis infini : tableaux en caisse, ferraille au four, erreur = sonné |
+| 🔥 Le Filtre | 30 s de tapis infini : objets de valeur en caisse, ferraille au four, 3 vies |
 | 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide |
 | 🚬 Pause clope | tirer et relâcher dans la zone verte sans tousser |
 | 🍽️ Bonnes manières | manger quand Tonton ne regarde pas, sinon il tire |
 | 🕷️ L'Araignée | patate chaude : refiler l'araignée-bombe avant l'explosion |
 | 💥 Champ de mines | traverser à l'aveugle, sonar à l'arrêt, moissonneuse aux trousses |
-| 🕵️ Undercover | bluff (à 2 : deviner le mot de l'autre en 2 essais) |
+| 🕵️ Undercover | bluff : 1 undercover jusqu'à 5, + Mr White dès 6, 2 undercovers dès 8 (à 2 : deviner le mot de l'autre) |
 | 🪖 Tank | ZQSD pour rouler, flèches pour viser, espace pour tirer, 2 vies, caisses destructibles |
 | 🧨 Syllabes | chacun son tour, un mot qui contient la syllabe ; la mèche raccourcit (10 s → 3 s) et repart après chaque explosion |
-| 🏎️ Circuit | course en vue pilote (route pseudo-3D), feux de départ, virages, cônes, turbos, voitures fantômes |
+| 🏎️ Circuit | course en vue pilote (route pseudo-3D), feux de départ, virages, cônes, gosses qui traversent, turbos |
 | 🔐 Code secret | casser un code de 4 couleurs en 8 essais, une marque sur chaque boule (⚫ bonne place, ⚪ ailleurs) |
-| 🐍 Serpents | manger pour grandir, ne toucher ni mur ni serpent |
+| 🐍 Serpents | manger pour grandir, ne toucher ni mur ni serpent (rendu fluide entre les pas) |
 | 🪶 Envol | un seul bouton pour battre des ailes entre les cheminées, départ après un 3-2-1 |
-| 🚩 Déminage | la même grille pour tous, premier à tout déminer |
+| 🚩 Déminage | la même grille pour tous, le premier qui a tout déminé termine la manche |
 
 **Comptes, niveaux, skins, amis**
 - Compte (pseudo + email + mot de passe) ou jeu en invité. Connexion avec le pseudo ou l'email.
