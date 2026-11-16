@@ -34,7 +34,7 @@ Compte ~15 minutes la première fois. Ensuite, une mise à jour prend 30 seconde
 
 ### Pourquoi OVH plutôt que Hostinger
 
-- **Serveurs en France** (Gravelines, Roubaix, Strasbourg) : le meilleur ping pour vous, et ça compte pour Tron, Esquive et Réflexe.
+- **Serveurs en France** (Gravelines, Roubaix, Strasbourg) : le meilleur ping pour vous, et ça compte pour Tron, Lames et le Duel au soleil.
 - **Facturation au mois, sans engagement.** Chez Hostinger, le prix d'appel du KVM 1 demande de payer 24 mois d'avance, puis double au renouvellement.
 - L'anti-DDoS et le trafic illimité sont inclus.
 

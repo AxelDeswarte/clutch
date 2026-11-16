@@ -56,11 +56,11 @@ Voir **[DEPLOY.md](DEPLOY.md)** : VPS OVHcloud + un script qui installe tout (`d
 - `server.js` : HTTP statique, WebSocket, salons, modes, scores, reconnexion, présence des amis.
 - `accounts.js` / `store.js` : comptes (mots de passe scrypt, jetons signés HMAC), amis, XP. Stockage Postgres si `DATABASE_URL` est défini (Neon), sinon fichier `data/db.json`.
 - `public/cosmetics.js` : niveaux et catalogue des skins, partagé client/serveur.
-- `games.js` : logique des 9 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
-- `public/app.js` : client (salon, affichage de chaque jeu, interpolation pour Esquive et Course).
+- `games.js` : logique des 13 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
+- `public/app.js` : client (salon, affichage de chaque jeu, interpolation des jeux en temps réel).
 - `public/gags.js` : animations d'élimination (Web Animations API) + sons synthétisés (WebAudio, aucun fichier audio).
 
-Seule exception à l'autorité du serveur : en Réflexe, le temps de réaction est mesuré côté client pour neutraliser la latence.
+Seule exception à l'autorité du serveur : au Duel au soleil, le temps de réaction est mesuré côté client pour neutraliser la latence.
 
 ## Ajouter un mini-jeu
 
