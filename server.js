@@ -8,9 +8,12 @@ const { GAMES, shuffle, ri } = require('./games');
 const store = require('./store');
 const ACC = require('./accounts');
 const C = require('./public/cosmetics');
+const mailer = require('./mailer');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
+// adresse publique du site pour les liens envoyés par email (jamais l'en-tête Host, falsifiable)
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const PUBLIC = path.join(__dirname, 'public');
 const MAX_MEMBERS = 6;
 const GRACE_MS = 45000; // temps laissé pour revenir après un refresh / une coupure
@@ -490,7 +493,7 @@ wss.on('connection', (ws) => {
       case 'register':
       case 'login': {
         if (rateLimited()) return fail('Trop d\'essais, attends une minute.');
-        const res = m.t === 'register' ? ACC.register(m.name, m.pass) : ACC.login(m.name, m.pass);
+        const res = m.t === 'register' ? ACC.register(m.name, m.pass, m.email) : ACC.login(m.name, m.pass);
         if (res.err) return reply({ t: 'authErr', msg: res.err });
         setUser(S, res.user);
         reply({ t: 'token', token: ACC.makeToken(res.user.id) });
@@ -499,6 +502,49 @@ wss.on('connection', (ws) => {
       case 'logout':
         setUser(S, null);
         return;
+      case 'forgot': {
+        if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
+        const r = ACC.startReset(m.email);
+        if (r) {
+          mailer.sendReset(r.u.email, r.u.name, `${PUBLIC_URL}/?reset=${r.token}`, ACC.RESET_MS / 60000)
+            .catch((e) => console.error('Email de réinitialisation non envoyé :', e.message));
+        }
+        // même réponse que le compte existe ou non : on ne révèle pas quels emails sont inscrits
+        reply({ t: 'acctOk', k: 'forgot', msg: 'Si un compte utilise cet email, un lien vient d\'être envoyé (pense aux spams).' });
+        return;
+      }
+      case 'resetPass': {
+        if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
+        const res = ACC.finishReset(m.token, m.pass);
+        if (res.err) return reply({ t: 'acctErr', k: 'reset', msg: res.err });
+        // les autres sessions de ce compte sont déconnectées (leur jeton n'est plus valable)
+        online.get(res.user.id)?.forEach((S2) => { if (S2 !== S) { sendWs(S2.ws, { t: 'tokenBad' }); setUser(S2, null); } });
+        setUser(S, res.user);
+        reply({ t: 'token', token: ACC.makeToken(res.user.id) });
+        reply({ t: 'acctOk', k: 'reset', msg: 'Mot de passe changé, tu es connecté 🎉' });
+        return;
+      }
+      case 'rename': {
+        if (!S.user) return;
+        const err = ACC.rename(S.user, m.name);
+        if (err) return reply({ t: 'acctErr', k: 'rename', msg: err });
+        pushMe(S.user.id);
+        presenceChanged(S.user.id);
+        online.get(S.user.id)?.forEach((S2) => {
+          if (S2.room && S2.member) { S2.member.name = S.user.name; if (S2.room.state === 'lobby') S2.room.broadcastRoom(); }
+        });
+        reply({ t: 'acctOk', k: 'rename', msg: `Tu t'appelles maintenant ${S.user.name} ✨` });
+        return;
+      }
+      case 'setEmail': {
+        if (!S.user) return;
+        if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
+        const err = ACC.setEmail(S.user, m.email, m.pass);
+        if (err) return reply({ t: 'acctErr', k: 'email', msg: err });
+        pushMe(S.user.id);
+        reply({ t: 'acctOk', k: 'email', msg: 'Email enregistré ✉️' });
+        return;
+      }
       case 'equip': {
         if (!S.user) return;
         const err = ACC.equip(S.user, { avatar: m.avatar, frame: m.frame, title: m.title });

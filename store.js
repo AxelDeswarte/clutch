@@ -9,6 +9,7 @@ class Store {
   constructor() {
     this.users = new Map();   // id -> user
     this.byName = new Map();  // nom en minuscules -> id
+    this.byEmail = new Map(); // email en minuscules -> id
     this.meta = {};
     this.dirty = new Set();
     this.kind = 'memory';
@@ -36,9 +37,16 @@ class Store {
     console.log(`Comptes : stockage ${this.kind} (${this.users.size} comptes)`);
   }
 
-  _index(u) { this.users.set(u.id, u); this.byName.set(u.name.toLowerCase(), u.id); }
+  _index(u) {
+    this.users.set(u.id, u);
+    this.byName.set(u.name.toLowerCase(), u.id);
+    if (u.email) this.byEmail.set(u.email.toLowerCase(), u.id);
+  }
   get(id) { return this.users.get(id) || null; }
   findByName(name) { const id = this.byName.get(String(name || '').trim().toLowerCase()); return id ? this.users.get(id) : null; }
+  findByEmail(email) { const id = this.byEmail.get(String(email || '').trim().toLowerCase()); return id ? this.users.get(id) : null; }
+  rename(u, name) { this.byName.delete(u.name.toLowerCase()); u.name = name; this.byName.set(name.toLowerCase(), u.id); this.save(u); }
+  setEmail(u, email) { if (u.email) this.byEmail.delete(u.email.toLowerCase()); u.email = email; this.byEmail.set(email.toLowerCase(), u.id); this.save(u); }
   create(u) { this._index(u); this.save(u); }
   save(u) { this.dirty.add(u.id); }
   setMeta(k, v) { this.meta[k] = v; this.dirty.add('__meta'); }

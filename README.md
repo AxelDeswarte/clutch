@@ -10,7 +10,7 @@ Jeu multijoueur dans le navigateur, de 2 à 6 joueurs. Chaque manche tire un min
 | Chacun pour soi | 3 à 6 | N manches, 3 / 2 / 1 pts au podium |
 
 Le nombre de manches se règle dans le salon (1 à 25). Égalité à la fin = manche décisive.
-Les 13 mini-jeux sont jouables dans tous les modes.
+Les 15 mini-jeux sont jouables dans tous les modes.
 
 **Mini-jeux** (plusieurs inspirés de Machine Party)
 | Jeu | Principe |
@@ -21,16 +21,20 @@ Les 13 mini-jeux sont jouables dans tous les modes.
 | 🧠 Mémoire | recliquer les cases allumées, une de plus par niveau |
 | 🪚 Lames | esquiver scies circulaires et lasers rotatifs |
 | 🏃 Course de haies | alterner ← → et sauter au bon moment |
-| 🔥 Le Filtre | tapis à ton rythme : tableaux en caisse, ferraille au four, erreur = sonné |
+| 🔥 Le Filtre | 40 s de tapis infini : tableaux en caisse, ferraille au four, erreur = sonné |
 | 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide |
 | 🚬 Pause clope | tirer et relâcher dans la zone verte sans tousser |
 | 🍽️ Bonnes manières | manger quand Tonton ne regarde pas, sinon il tire |
 | 🕷️ L'Araignée | patate chaude : refiler l'araignée-bombe avant l'explosion |
 | 💥 Champ de mines | traverser à l'aveugle, sonar à l'arrêt, moissonneuse aux trousses |
 | 🕵️ Undercover | bluff (variante 1v1 : deviner le mot de l'autre en 2 essais) |
+| 🪖 Tank | ZQSD pour rouler, flèches pour viser, espace pour tirer, 2 vies, caisses destructibles |
+| 🧨 Syllabes | chacun son tour, un mot français qui contient la syllabe avant que la mèche brûle |
 
 **Comptes, niveaux, skins, amis**
-- Compte (pseudo + mot de passe) ou jeu en invité.
+- Compte (pseudo + email + mot de passe) ou jeu en invité. Connexion avec le pseudo ou l'email.
+- Mot de passe oublié : lien envoyé par email (valable 30 min). Pseudo et email modifiables dans ⚙️ Compte.
+  Les comptes créés avant l'email voient un bandeau qui leur demande d'en ajouter un.
 - XP à chaque match : participation, manches gagnées, victoire. Chaque niveau débloque des avatars, des cadres (Néon, Sanglant, Or, En feu, Glitch, Néant…) et des titres.
 - Amis : ajout par pseudo, statut en direct (en ligne, dans un salon, en partie), bouton **Rejoindre** et invitations.
 - Refresh ou coupure réseau : tu reviens automatiquement dans ton salon ou dans la manche en cours (45 s pour revenir).
@@ -54,9 +58,10 @@ Voir **[DEPLOY.md](DEPLOY.md)** : VPS OVHcloud + un script qui installe tout (`d
 ## Architecture
 
 - `server.js` : HTTP statique, WebSocket, salons, modes, scores, reconnexion, présence des amis.
-- `accounts.js` / `store.js` : comptes (mots de passe scrypt, jetons signés HMAC), amis, XP. Stockage Postgres si `DATABASE_URL` est défini (Neon), sinon fichier `data/db.json`.
+- `accounts.js` / `store.js` : comptes (mots de passe scrypt, jetons signés HMAC), email, mot de passe oublié, amis, XP. Stockage Postgres si `DATABASE_URL` est défini (Neon), sinon fichier `data/db.json`.
+- `mailer.js` : envoi des emails via Resend (`RESEND_API_KEY`). Sans clé, le lien est affiché dans la console du serveur.
 - `public/cosmetics.js` : niveaux et catalogue des skins, partagé client/serveur.
-- `games.js` : logique des 13 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
+- `games.js` : logique des 15 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
 - `public/app.js` : client (salon, affichage de chaque jeu, interpolation des jeux en temps réel).
 - `public/gags.js` : animations d'élimination (Web Animations API) + sons synthétisés (WebAudio, aucun fichier audio).
 

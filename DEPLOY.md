@@ -18,6 +18,18 @@ La table est créée automatiquement au premier démarrage. Rien d'autre à fair
 
 *(Optionnel)* `CLUTCH_SECRET` = une longue chaîne aléatoire. Sinon un secret est généré et stocké dans la base tout seul.
 
+### 3. Les emails « mot de passe oublié » avec Resend
+
+1. Crée un compte gratuit sur **resend.com** (3 000 emails/mois).
+2. **Domains → Add Domain** : ajoute un nom de domaine qui t'appartient et copie les enregistrements DNS qu'il donne chez ton registrar. Sans domaine vérifié, Resend n'envoie qu'à l'adresse de ton propre compte Resend (pratique pour tester, pas pour tes potes).
+3. **API Keys → Create API Key** (permission *Sending access*).
+4. Sur Render → **Environment**, ajoute :
+   - `RESEND_API_KEY` = la clé (commence par `re_`)
+   - `MAIL_FROM` = `CLUTCH <noreply@tondomaine.fr>` (une adresse du domaine vérifié)
+
+Les liens des emails pointent vers l'adresse publique du site : Render la fournit tout seul (`RENDER_EXTERNAL_URL`). Ailleurs, ou avec ton propre domaine, définis `PUBLIC_URL` (ex. `https://clutch.tondomaine.fr`).
+Sans `RESEND_API_KEY`, aucun email ne part : le lien s'affiche dans les logs du serveur.
+
 ### Mettre à jour
 ```powershell
 git add -A
@@ -108,3 +120,5 @@ Attention, la mise à jour redémarre le serveur : les parties en cours sont cou
 
 
 Sur un VPS, les comptes sont enregistrés dans `/opt/clutch/data/db.json` (conservé lors des mises à jour). Tu peux aussi définir `DATABASE_URL` pour utiliser Postgres.
+
+Pour les emails sur un VPS : ajoute `RESEND_API_KEY`, `MAIL_FROM` et `PUBLIC_URL` (voir la section Resend plus haut) dans l'environnement du service.

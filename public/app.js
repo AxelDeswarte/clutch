@@ -484,6 +484,8 @@ window.addEventListener('blur', () => { if (cur && cur.blur) cur.blur(); });
 function pushSnap(S, data) { S.prev = S.cur || { time: performance.now(), d: data }; S.cur = { time: performance.now(), d: data }; }
 function alphaOf(S) { return Math.max(0, Math.min(1, (performance.now() - S.cur.time) / 34)); }
 const lerp = (a, b, t) => a + (b - a) * t;
+// police des emojis sur canvas : on nomme les polices couleur, sinon certains navigateurs n'affichent rien
+const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", serif';
 function strokeText(c, txt, x, y, fill, size = 12) {
   c.font = `800 ${size}px Nunito, system-ui`; c.textAlign = 'center'; c.lineWidth = 3; c.strokeStyle = '#1b1440';
   c.strokeText(txt, x, y); c.fillStyle = fill; c.fillText(txt, x, y);
@@ -666,18 +668,24 @@ GAMES.filter = {
         <button class="btn sortbtn" data-b="0" style="background:#ff9f1c"><span class="k">⬅ ou Q</span>🔥 AU FOUR<small>la ferraille 🔩⚙️🔧</small></button>
         <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>les tableaux 🖼️</small></button>
       </div>
-      <div class="ucturn" id="fnow" style="margin:0 0 8px">Le tapis démarre…</div>
-      <div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${progsInit()}
-      <p class="sub">Ton tapis avance à ton rythme. Erreur = sonné 1,5 s.</p>`;
+      <div class="ucturn" id="fnow" style="margin:0 0 8px">Le tapis démarre…</div><div class="tbar" style="margin-bottom:10px"><div id="fbar" style="width:0"></div></div>
+      <div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${legend()}
+      <p class="sub">40 secondes, tapis infini. Erreur = sonné 1,5 s.</p>`;
     this.items = null; this.pos = 0; this.stunUntil = 0; this.anims = []; this.slideT = 0; this.raf = null;
     $('#stage').querySelectorAll('.sortbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.sort(+b.dataset.b); }));
   },
   msg(m) {
-    if (m.k === 'belt') { this.items = m.items; this.N = m.n; this.stunMs = m.stun; progsUpdate(M.players.map(() => 0)); this.status(); this.loop(); }
+    if (m.k === 'belt') {
+      this.items = m.items; this.N = m.n; this.stunMs = m.stun;
+      M.players.forEach((_, i) => legendSet(i, '0'));
+      timerBar($('#fbar'), m.ms); this.status(); this.loop();
+    }
     if (m.k === 'prog') {
-      progsUpdate(m.pos.map((p) => p / this.N));
+      m.pos.forEach((p, i) => legendSet(i, String(p)));
       if (m.pos[M.me] > this.pos) { this.pos = m.pos[M.me]; this.status(); }
     }
+    // le serveur a refusé un tri : on recale le tapis sur sa position
+    if (m.k === 'sync') { this.pos = m.p; this.anims = []; this.status(); }
     if (m.k === 'stun' && m.i === M.me && performance.now() > this.stunUntil) this.stunUntil = performance.now() + m.ms;
   },
   key(e) {
@@ -687,13 +695,13 @@ GAMES.filter = {
   },
   status() {
     const el = $('#fnow'); if (!el || !this.items) return;
-    el.textContent = this.pos >= this.N ? '🏁 Tout trié !' : `Objet ${this.pos + 1} / ${this.N} : ${this.items[this.pos].e} ${this.items[this.pos].n}`;
+    el.textContent = this.pos >= this.N ? '🏁 Tout trié !' : `Trié : ${this.pos} · ${this.items[this.pos].e} ${this.items[this.pos].n}`;
   },
   sort(b) {
     if (!this.items || !active || dead || this.pos >= this.N) return;
     const now = performance.now();
     if (now < this.stunUntil) { shake($('#fc')); return; }
-    send({ t: 'input', a: 'sort', b });
+    send({ t: 'input', a: 'sort', b, p: this.pos });
     const it = this.items[this.pos];
     const want = it.e === '🖼️' ? 1 : 0;
     if (b === want) {
@@ -721,28 +729,30 @@ GAMES.filter = {
       c.fillRect(ZX + 110, 14, 150, 62); c.strokeRect(ZX + 110, 14, 150, 62);
       c.beginPath(); c.moveTo(ZX + 110, 45); c.lineTo(ZX + 260, 45); c.stroke();
       strokeText(c, 'CAISSE (tableaux) ➡', ZX + 185, 38, '#fff', 14);
-      // tapis : glisse d'un cran à chaque tri
+      // tapis : les objets arrivent par la gauche et glissent d'un cran vers la zone de tri à chaque tri
       const slide = Math.max(0, 1 - (now - this.slideT) / 160);
+      const ease = slide * slide;
       c.fillStyle = '#3a3166'; c.fillRect(0, BY, W, 24);
       c.fillStyle = '#58508f';
-      const off = ((this.pos - slide) * GAP) % 30;
+      const off = (((this.pos - ease) * GAP) % 30 + 30) % 30;
       for (let x = off - 30; x < W; x += 30) c.fillRect(x, BY + 4, 14, 16);
       c.strokeStyle = '#ffd23f'; c.lineWidth = 4; c.setLineDash([8, 6]); c.strokeRect(ZX - 55, 80, 110, 112); c.setLineDash([]);
-      for (let k = 0; k < 7; k++) {
+      c.textAlign = 'center';
+      for (let k = 0; k < 6; k++) {
         const idx = this.pos + k; if (idx >= this.N) break;
         const it = this.items[idx];
-        const x = ZX - (k - slide) * GAP;
+        const x = ZX - (k + ease) * GAP;
         if (x < -60) break;
-        c.font = k === 0 ? '58px serif' : '40px serif'; c.textAlign = 'center'; c.globalAlpha = k === 0 ? 1 : 0.75;
+        c.font = (k === 0 ? 58 : 40) + 'px ' + EMOJI_FONT; c.globalAlpha = k === 0 ? 1 : 0.75;
         c.fillText(it.e, x, BY - 10); c.globalAlpha = 1;
-        if (k === 0) strokeText(c, it.n, x, BY + 46, '#fff', 14);
+        if (k === 0 && slide < 0.5) strokeText(c, it.n, x, BY + 46, '#fff', 14);
       }
       // objets triés qui partent vers le four ou la caisse
       this.anims = this.anims.filter((a) => now - a.t < 380);
       this.anims.forEach((a) => {
         const k = (now - a.t) / 380;
         const tx = a.b === 0 ? ZX - 175 : ZX + 185, ty = a.b === 0 ? 250 : 50;
-        c.globalAlpha = 1 - k * 0.6; c.font = '48px serif'; c.textAlign = 'center';
+        c.globalAlpha = 1 - k * 0.6; c.font = '48px ' + EMOJI_FONT; c.textAlign = 'center';
         c.fillText(a.e, lerp(ZX, tx, k), lerp(BY - 10, ty, k) - Math.sin(k * Math.PI) * 50); c.globalAlpha = 1;
       });
       if (this.pos >= this.N) strokeText(c, '🏁 FINI !', ZX, 130, '#2ee59d', 30);
@@ -1478,6 +1488,182 @@ GAMES.undercover = {
         <span class="bubbles">${this.said[i].map((c) => `<span class="bubble ${c.c || ''}">${esc(c.t)}</span>`).join('')}</span><span>${right}</span></div>`;
     }).join('');
   },
+};
+
+// ── Tank ──
+// ZQSD = rouler, flèches = canon (ici on ne passe pas par DIRK, qui confond les deux)
+const MOVEK = { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
+const AIMK = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+const vecOf = (h) => [(h.has('right') ? 1 : 0) - (h.has('left') ? 1 : 0), (h.has('down') ? 1 : 0) - (h.has('up') ? 1 : 0)];
+GAMES.tank = {
+  init() {
+    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="tc" width="800" height="500"></canvas></div>${legend()}
+      <p class="sub">ZQSD rouler · flèches viser · ESPACE tirer</p>`;
+    this.held = new Set(); this.aimHeld = new Set(); this.lastV = '0,0';
+    this.S = {}; this.raf = null; this.boxes = []; this.fx = []; this.booms = [];
+    // tactile : le pad sert à rouler et vise dans la même direction
+    $('#stage').appendChild(dpad((d) => { this.held.add(d); this.sendMv(true); }, (d) => { this.held.delete(d); this.sendMv(true); }));
+    if (isTouch) {
+      const b = document.createElement('button'); b.className = 'btn pink'; b.style.marginTop = '10px'; b.textContent = '💥 Tirer';
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); if (active && !dead) send({ t: 'input', a: 'fire' }); });
+      $('#stage').appendChild(b);
+    }
+  },
+  sendMv(aimToo) {
+    const [x, y] = vecOf(this.held), v = x + ',' + y;
+    if (v !== this.lastV) { this.lastV = v; send({ t: 'input', a: 'mv', x, y }); }
+    if (aimToo && (x || y)) send({ t: 'input', a: 'aim', x, y });
+  },
+  sendAim() { const [x, y] = vecOf(this.aimHeld); if (x || y) send({ t: 'input', a: 'aim', x, y }); },
+  key(e) {
+    if (MOVEK[e.code]) { e.preventDefault(); if (!e.repeat) { this.held.add(MOVEK[e.code]); this.sendMv(); } }
+    else if (AIMK[e.code]) { e.preventDefault(); if (!e.repeat) { this.aimHeld.add(AIMK[e.code]); this.sendAim(); } }
+    else if (e.code === 'Space') { e.preventDefault(); send({ t: 'input', a: 'fire' }); } // maintenu = tir auto (recharge côté serveur)
+  },
+  keyup(e) {
+    if (MOVEK[e.code]) { this.held.delete(MOVEK[e.code]); this.sendMv(); }
+    if (AIMK[e.code]) { this.aimHeld.delete(AIMK[e.code]); this.sendAim(); }
+  },
+  blur() { this.held.clear(); this.aimHeld.clear(); this.sendMv(); },
+  msg(m) {
+    if (m.k === 'tank') {
+      this.W = m.w; this.H = m.h; this.PR = m.pr; this.BR = m.br;
+      this.boxes = m.boxes.map(([x, y, w, h, metal, hp]) => ({ x, y, w, h, metal, hp }));
+      M.players.forEach((_, i) => legendSet(i, '❤️❤️'));
+      this.loop();
+    }
+    if (m.k === 'fire') SFX.play('gun');
+    if (m.k === 'box') {
+      const b = this.boxes[m.id]; if (b) b.hp = m.hp;
+      this.booms.push({ x: m.x, y: m.y, t: performance.now(), r: b && b.hp <= 0 ? 50 : 14 });
+      SFX.play(b && b.hp <= 0 ? 'boom' : 'bonk');
+    }
+    if (m.k === 'hit') {
+      legendSet(m.i, m.l > 0 ? '❤️'.repeat(m.l) : '💀');
+      const q = this.S.cur && this.S.cur.d.p[m.i];
+      if (q) { this.booms.push({ x: q[0], y: q[1], t: performance.now(), r: 40 }); fxText(this, q[0], q[1] - 26, m.l > 0 ? 'TOUCHÉ !' : 'DÉTRUIT !', '#ff4d6d'); }
+      SFX.play('boom');
+    }
+    if (m.k === 's') pushSnap(this.S, m);
+  },
+  loop() {
+    const c = $('#tc').getContext('2d');
+    const draw = () => {
+      this.raf = requestAnimationFrame(draw);
+      const S = this.S; if (!S.cur) return;
+      const a = alphaOf(S), A = S.prev.d, B = S.cur.d, now = performance.now();
+      c.fillStyle = '#3b5f3a'; c.fillRect(0, 0, this.W, this.H);
+      c.strokeStyle = 'rgba(0,0,0,.08)'; c.lineWidth = 1;
+      for (let x = 0; x < this.W; x += 50) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, this.H); c.stroke(); }
+      for (let y = 0; y < this.H; y += 50) { c.beginPath(); c.moveTo(0, y); c.lineTo(this.W, y); c.stroke(); }
+      this.boxes.forEach((b) => {
+        if (b.hp <= 0) return;
+        c.fillStyle = b.metal ? '#8a90a8' : ['#7a4f24', '#a8692f', '#c98b4a'][b.hp - 1] || '#c98b4a';
+        c.fillRect(b.x, b.y, b.w, b.h); c.strokeStyle = '#1b1440'; c.lineWidth = 3; c.strokeRect(b.x, b.y, b.w, b.h);
+        c.beginPath();
+        if (b.metal) { [[6, 6], [b.w - 6, 6], [6, b.h - 6], [b.w - 6, b.h - 6]].forEach(([dx, dy]) => { c.moveTo(b.x + dx + 3, b.y + dy); c.arc(b.x + dx, b.y + dy, 3, 0, 7); }); }
+        else { c.moveTo(b.x, b.y); c.lineTo(b.x + b.w, b.y + b.h); c.moveTo(b.x + b.w, b.y); c.lineTo(b.x, b.y + b.h); }
+        c.stroke();
+      });
+      B.b.forEach(([x, y, o]) => {
+        c.fillStyle = P(o).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2;
+        c.beginPath(); c.arc(x, y, this.BR, 0, 7); c.fill(); c.stroke();
+      });
+      drawPlayersAt(c, S, a, this.PR, 0, (i, x, y) => {
+        const p = B.p[i], ang = p[3] / 100;
+        // canon
+        c.strokeStyle = '#1b1440'; c.lineWidth = 9; c.lineCap = 'round';
+        c.beginPath(); c.moveTo(x + Math.cos(ang) * (this.PR - 2), y + Math.sin(ang) * (this.PR - 2)); c.lineTo(x + Math.cos(ang) * (this.PR + 14), y + Math.sin(ang) * (this.PR + 14)); c.stroke();
+        c.strokeStyle = P(i).color; c.lineWidth = 5;
+        c.beginPath(); c.moveTo(x + Math.cos(ang) * (this.PR - 1), y + Math.sin(ang) * (this.PR - 1)); c.lineTo(x + Math.cos(ang) * (this.PR + 13), y + Math.sin(ang) * (this.PR + 13)); c.stroke();
+        c.lineCap = 'butt';
+        if (p[5] && Math.floor(now / 100) % 2) { c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x, y, this.PR + 9, 0, 7); c.stroke(); }
+        c.font = '11px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('❤️'.repeat(p[4]), x, y + this.PR + 20);
+      });
+      this.booms = this.booms.filter((b) => now - b.t < 500);
+      this.booms.forEach((b) => { const k = (now - b.t) / 500; c.globalAlpha = 1 - k; c.fillStyle = '#ffd23f'; c.beginPath(); c.arc(b.x, b.y, 6 + k * b.r, 0, 7); c.fill(); c.globalAlpha = 1; });
+      drawFx(c, this);
+    };
+    draw();
+  },
+  stop() { cancelAnimationFrame(this.raf); },
+};
+
+// ── Syllabes ──
+GAMES.words = {
+  init() {
+    $('#stage').innerHTML = `<div class="sylbox" id="syl"><span>Syllabe</span><b>…</b><span id="sylwho">On allume la mèche…</span></div>
+      <div class="ucturn" id="wst"></div><div class="tbar"><div id="wbar" style="width:0"></div></div>
+      <div class="ucin hidden" id="win"><input id="wtxt" maxlength="30" placeholder="Un mot avec la syllabe…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn blue" id="wsend">✅ Valider</button></div>
+      <div class="uclist" id="wl"></div><p class="sub">Accents facultatifs · un mot déjà dit ne compte plus</p>`;
+    const n = M.players.length;
+    this.lives = range(n).map(() => 2); this.typed = range(n).map(() => ''); this.last = range(n).map(() => null);
+    this.cur = -1; this.syl = '';
+    const go = () => { const v = $('#wtxt').value.trim(); if (v) send({ t: 'input', a: 'word', text: v }); };
+    $('#wsend').onclick = go;
+    $('#wtxt').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    $('#wtxt').addEventListener('input', () => send({ t: 'input', a: 'type', text: $('#wtxt').value }));
+    this.render();
+  },
+  msg(m) {
+    switch (m.k) {
+      case 'words': this.lives = m.lives; this.render(); break;
+      case 'turn': {
+        this.cur = m.i; this.syl = m.syl; this.lives = m.lives; this.typed[m.i] = '';
+        $('#syl b').textContent = m.syl.toUpperCase();
+        $('#syl').classList.remove('hot');
+        clearTimeout(this.hotT); this.hotT = setTimeout(() => $('#syl') && $('#syl').classList.add('hot'), Math.max(0, m.ms - 3000));
+        $('#sylwho').innerHTML = m.i === M.me ? '<b style="font-size:16px;color:#ff4d6d;-webkit-text-stroke:0;letter-spacing:0">À TOI !</b>' : `au tour de ${esc(P(m.i).name)}`;
+        $('#wst').textContent = '';
+        timerBar($('#wbar'), m.ms);
+        const mine = m.i === M.me;
+        $('#win').classList.toggle('hidden', !mine);
+        if (mine) { $('#wtxt').value = ''; $('#wtxt').focus(); SFX.play('ding'); }
+        this.render();
+        break;
+      }
+      case 'type': this.typed[m.i] = m.text; this.render(); break;
+      case 'ok':
+        this.last[m.i] = { t: m.text, c: 'good' }; this.typed[m.i] = '';
+        if (m.i === M.me) $('#win').classList.add('hidden');
+        clearTimeout(this.hotT); SFX.play('ok'); this.render();
+        break;
+      case 'nope':
+        if (m.i === M.me) { $('#wst').textContent = '⛔ ' + m.msg; shake($('#win')); SFX.play('bad'); }
+        else { this.last[m.i] = { t: m.text, c: 'bad' }; this.render(); }
+        break;
+      case 'boom':
+        clearTimeout(this.hotT);
+        this.lives = m.lives; this.typed[m.i] = '';
+        if (m.i === M.me) $('#win').classList.add('hidden');
+        $('#wst').innerHTML = `💥 ${pill(m.i)} a explosé sur « ${esc(m.syl.toUpperCase())} »`;
+        timerBar($('#wbar'), 1);
+        SFX.play('boom'); this.render();
+        break;
+    }
+  },
+  render() {
+    const el = $('#wl'); if (!el) return;
+    // surligne la syllabe dans le mot tapé, accents compris (« É » compte comme « e »)
+    const hl = (s) => {
+      const chars = [...s], flat = chars.map((ch) => ch.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''));
+      const at = []; // position dans le texte sans accents → index du caractère d'origine
+      flat.forEach((f, i) => { for (const _ of f) at.push(i); });
+      const k = this.syl ? flat.join('').indexOf(this.syl) : -1;
+      if (k < 0) return esc(s);
+      const a = at[k], b = at[k + this.syl.length - 1] + 1;
+      return esc(chars.slice(0, a).join('')) + '<mark>' + esc(chars.slice(a, b).join('')) + '</mark>' + esc(chars.slice(b).join(''));
+    };
+    el.innerHTML = M.players.map((p, i) => {
+      const L = this.lives[i];
+      const said = i === this.cur && this.typed[i] ? `<span class="typed">${hl(this.typed[i])}</span>`
+        : this.last[i] ? `<span class="bubble ${this.last[i].c}">${esc(this.last[i].t)}</span>` : '';
+      return `<div class="ucp ${L <= 0 ? 'out' : ''} ${this.cur === i ? 'speaking' : ''}" style="grid-template-columns:auto 1fr auto">${pill(i)}<span>${said}</span>
+        <span class="lives">${L > 0 ? '❤️'.repeat(L) : '💀'}</span></div>`;
+    }).join('');
+  },
+  stop() { clearTimeout(this.hotT); },
 };
 
 // ════════════════ accueil / salon ════════════════

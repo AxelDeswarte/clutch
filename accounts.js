@@ -4,6 +4,9 @@ const store = require('./store');
 const C = require('./public/cosmetics');
 
 const NAME_RE = /^[\p{L}\p{N}_.-]{3,16}$/u;
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+const RESET_MS = 30 * 60 * 1000;
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 function secret() {
   if (process.env.CLUTCH_SECRET) return process.env.CLUTCH_SECRET;
@@ -24,39 +27,58 @@ function checkPass(pass, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// jeton = id.expiration.signature (HMAC-SHA256), valable 60 jours
+// jeton = id.expiration.signature (HMAC-SHA256), valable 60 jours.
+// La signature inclut u.pv (version du mot de passe) : changer de mot de passe déconnecte les autres appareils.
+const signBody = (body, pv) => crypto.createHmac('sha256', secret()).update(pv ? `${body}.${pv}` : body).digest('base64url');
 function makeToken(id) {
   const exp = Date.now() + 60 * 24 * 3600 * 1000;
   const body = `${id}.${exp}`;
-  const sig = crypto.createHmac('sha256', secret()).update(body).digest('base64url');
-  return `${body}.${sig}`;
+  const u = store.get(id);
+  return `${body}.${signBody(body, u && u.pv)}`;
 }
 function readToken(tok) {
   const parts = String(tok || '').split('.');
   if (parts.length !== 3) return null;
   const [id, exp, sig] = parts;
-  const good = crypto.createHmac('sha256', secret()).update(`${id}.${exp}`).digest('base64url');
+  const u = store.get(id);
+  if (!u) return null;
+  const good = signBody(`${id}.${exp}`, u.pv);
   if (sig.length !== good.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good))) return null;
   if (Number(exp) < Date.now()) return null;
-  return store.get(id);
+  return u;
 }
 
-function register(name, pass) {
+const nameErr = (name, self) => {
+  if (!NAME_RE.test(name)) return 'Pseudo : 3 à 16 caractères (lettres, chiffres, _ . -).';
+  const o = store.findByName(name);
+  if (o && o !== self) return 'Ce pseudo est déjà pris.';
+  return null;
+};
+const emailErr = (email, self) => {
+  if (!EMAIL_RE.test(email) || email.length > 254) return 'Adresse email invalide.';
+  const o = store.findByEmail(email);
+  if (o && o !== self) return 'Cet email est déjà utilisé par un autre compte.';
+  return null;
+};
+const passErr = (pass) => (pass.length < 4 || pass.length > 72 ? 'Mot de passe : 4 caractères minimum.' : null);
+
+function register(name, pass, email) {
   name = String(name || '').trim();
   pass = String(pass || '');
-  if (!NAME_RE.test(name)) return { err: 'Pseudo : 3 à 16 caractères (lettres, chiffres, _ . -).' };
-  if (pass.length < 4 || pass.length > 72) return { err: 'Mot de passe : 4 caractères minimum.' };
-  if (store.findByName(name)) return { err: 'Ce pseudo est déjà pris.' };
+  email = String(email || '').trim();
+  const err = nameErr(name) || emailErr(email) || passErr(pass);
+  if (err) return { err };
   const u = {
-    id: crypto.randomBytes(8).toString('hex'), name, pass: hashPass(pass), created: Date.now(),
+    id: crypto.randomBytes(8).toString('hex'), name, email, pass: hashPass(pass), created: Date.now(),
     xp: 0, avatar: C.BASE_AVATARS[Math.floor(Math.random() * C.BASE_AVATARS.length)], frame: 'classic', title: 'bleu',
     stats: { matches: 0, wins: 0, rounds: 0 }, friends: [], reqIn: [], reqOut: [],
   };
   store.create(u);
   return { user: u };
 }
+// on se connecte avec son pseudo OU son email
 function login(name, pass) {
-  const u = store.findByName(name);
+  const u = String(name || '').includes('@') ? store.findByEmail(name) : store.findByName(name);
   if (!u || !checkPass(String(pass || ''), u.pass)) return { err: 'Pseudo ou mot de passe incorrect.' };
   return { user: u };
 }
@@ -67,7 +89,49 @@ function publicProfile(u) {
 }
 function meProfile(u) {
   const L = level(u);
-  return { ...publicProfile(u), stats: u.stats, xpLevel: C.xpForLevel(L), xpNext: C.xpForLevel(L + 1) };
+  return { ...publicProfile(u), email: u.email || '', stats: u.stats, xpLevel: C.xpForLevel(L), xpNext: C.xpForLevel(L + 1) };
+}
+
+// ── pseudo, email, mot de passe oublié ──
+function rename(u, name) {
+  name = String(name || '').trim();
+  if (name === u.name) return null;
+  const err = nameErr(name, u);
+  if (err) return err;
+  store.rename(u, name);
+  return null;
+}
+function setEmail(u, email, pass) {
+  email = String(email || '').trim();
+  if (!checkPass(String(pass || ''), u.pass)) return 'Mot de passe incorrect.';
+  const err = emailErr(email, u);
+  if (err) return err;
+  store.setEmail(u, email);
+  return null;
+}
+// renvoie { u, token } si l'email correspond à un compte ; seul le hash du jeton est stocké
+function startReset(email) {
+  const u = store.findByEmail(String(email || '').trim());
+  if (!u) return null;
+  if (u.reset && Date.now() < u.reset.exp - RESET_MS + 60000) return null; // 1 email par minute max
+  const token = crypto.randomBytes(24).toString('base64url');
+  u.reset = { h: sha(token), exp: Date.now() + RESET_MS };
+  store.save(u);
+  return { u, token };
+}
+function finishReset(token, pass) {
+  pass = String(pass || '');
+  const h = sha(String(token || ''));
+  let u = null;
+  for (const v of store.users.values()) if (v.reset && v.reset.h === h) { u = v; break; }
+  if (!u || u.reset.exp < Date.now()) return { err: 'Lien expiré ou déjà utilisé. Redemande un email.' };
+  const err = passErr(pass);
+  if (err) return { err };
+  u.pass = hashPass(pass);
+  u.pv = (u.pv || 0) + 1;
+  delete u.reset;
+  store.save(u);
+  return { user: u };
 }
 
 function equip(u, { avatar, frame, title }) {
@@ -122,4 +186,4 @@ function awardMatch(u, { roundsWon, won, points }) {
   return { gained, xp: u.xp, level: after, prevLevel: before, unlocks: C.unlocksBetween(before, after), xpLevel: C.xpForLevel(after), xpNext: C.xpForLevel(after + 1) };
 }
 
-module.exports = { register, login, makeToken, readToken, publicProfile, meProfile, equip, friendRequest, friendAccept, friendRemove, awardMatch, level };
+module.exports = { register, login, rename, setEmail, startReset, finishReset, RESET_MS, makeToken, readToken, publicProfile, meProfile, equip, friendRequest, friendAccept, friendRemove, awardMatch, level };

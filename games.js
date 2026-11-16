@@ -488,40 +488,45 @@ const circleSpawn = (W, H, rx, ry) => (i, n) => { const a = (i / n) * Math.PI * 
 
 // ───────────────────────── LE FILTRE ─────────────────────────
 const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex'], ['🖼️', 'Diplôme encadré'], ['🖼️', 'Portrait du patron'], ['🖼️', 'Selfie de mariage']];
-const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🪛', 'Tournevis'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
+// emojis anciens uniquement : les récents (🪛…) ne s'affichent pas partout (Windows 10)
+const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🔨', 'Marteau'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
 GAMES.filter = {
   icon: '🔥',
-  desc: 'Trie à ton rythme : tableaux en caisse, ferraille au four',
+  desc: 'Trie le plus vite possible en 40 s',
   title: 'Le Filtre',
   min: 2,
-  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. ⬅ ou Q = 🔥 FOUR pour la FERRAILLE 🔩 · ➡ ou D = 📦 CAISSE pour les TABLEAUX 🖼️. Une erreur = tu es sonné 1,5 s. Premier à trier 25 objets gagne.",
+  rules: "Ton tapis avance à TON rythme et ne s'arrête jamais : chaque objet trié fait venir le suivant. ⬅ ou Q = 🔥 FOUR pour la FERRAILLE 🔩 · ➡ ou D = 📦 CAISSE pour les TABLEAUX 🖼️. Une erreur = tu es sonné 1,5 s. 40 secondes : celui qui en a trié le plus gagne.",
   create(room) {
-    const n = room.n, N = 25, STUN = 1500;
+    const n = room.n, N = 400, STUN = 1500, DUR = 40000;
     const items = Array.from({ length: N }, () => {
       const frame = Math.random() < 0.5;
       const [e, name] = pick(frame ? FRAMES : PARTS);
       return { e, n: name, f: frame };
     });
     const pos = new Array(n).fill(0), stun = new Array(n).fill(0);
-    const race = new Race(room);
-    const end = () => room.finish(race.scores(pos.map((p) => p / N)));
+    const end = () => {
+      const best = Math.max(...pos);
+      room.finish([...pos], range(n).sort((a, b) => pos[b] - pos[a]).map((i) => `${room.name(i)} ${pos[i]}`).join(' · ') + (best ? '' : ' — personne n\'a rien trié'));
+    };
     return {
       start() {
-        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n })), n: N, stun: STUN });
-        room.later(end, 90000);
+        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n })), n: N, stun: STUN, ms: DUR });
+        room.later(end, DUR);
       },
       input(i, m) {
-        if (m.a !== 'sort' || race.done[i] || (m.b !== 0 && m.b !== 1)) return;
+        if (m.a !== 'sort' || pos[i] >= N || (m.b !== 0 && m.b !== 1)) return;
+        // le client prédit son tapis : s'il est décalé (tri refusé pendant qu'il était sonné), on le recale
+        if (Number.isInteger(m.p) && m.p !== pos[i]) return room.send({ t: 'g', k: 'sync', p: pos[i] }, i);
         const now = Date.now();
-        if (now < stun[i]) return;
+        if (now < stun[i]) return room.send({ t: 'g', k: 'sync', p: pos[i] }, i);
         // 0 = four (ferraille), 1 = caisse (tableaux)
         const want = items[pos[i]].f ? 1 : 0;
         if (m.b === want) {
           pos[i]++;
           room.send({ t: 'g', k: 'prog', pos });
-          if (pos[i] >= N) race.finish(i, end);
         } else {
-          stun[i] = now + STUN;
+          // un peu de marge pour la latence : le client compte son étourdissement à partir de son clic
+          stun[i] = now + STUN - 250;
           room.send({ t: 'g', k: 'stun', i, ms: STUN });
         }
       },
@@ -979,5 +984,215 @@ function undercoverDuel(room) {
     },
   };
 }
+
+// ───────────────────────── TANK ─────────────────────────
+GAMES.tank = {
+  icon: '🪖',
+  desc: 'ZQSD pour rouler, flèches pour viser, 2 vies',
+  title: 'Tank',
+  min: 2,
+  rules: "ZQSD pour rouler, FLÈCHES pour orienter le canon, ESPACE pour tirer. Les obus rebondissent une fois sur les murs. Les caisses en bois cassent en 3 tirs, les blocs en métal jamais. 2 vies chacun, pas de tir ami en équipe. Dernier camp debout gagne.",
+  create(room) {
+    const n = room.n, W = 800, H = 500, DT = 1 / 30, PR = 15;
+    const BS = 430, BR = 5, CD = 0.45, LIVES = 2, INV = 1.5;
+    const spawn = circleSpawn(W, H, 330, 195);
+    const spawns = range(n).map((i) => spawn(i, n));
+    // obstacles : on en place la moitié puis on les reflète par rapport au centre (carte équitable)
+    const boxes = [];
+    const free = (x, y, w, h) => x > 20 && y > 20 && x + w < W - 20 && y + h < H - 20
+      && spawns.every(([sx, sy]) => Math.max(Math.abs(sx - (x + w / 2)) - w / 2, Math.abs(sy - (y + h / 2)) - h / 2) > 55)
+      && boxes.every((b) => x > b.x + b.w + 34 || x + w < b.x - 34 || y > b.y + b.h + 34 || y + h < b.y - 34);
+    for (let tries = 0; boxes.length < 14 && tries < 400; tries++) {
+      const w = pick([40, 40, 50, 80]), h = w === 80 ? 40 : pick([40, 50, 80]);
+      const x = ri(30, W - 30 - w), y = ri(30, H - 30 - h);
+      const mx = W - x - w, my = H - y - h;
+      if (!free(x, y, w, h)) continue;
+      const metal = Math.random() < 0.3;
+      boxes.push({ x, y, w, h, hp: 3, metal });
+      if (Math.abs(mx - x) > w + 34 || Math.abs(my - y) > h + 34) {
+        if (free(mx, my, w, h)) boxes.push({ x: mx, y: my, w, h, hp: 3, metal });
+        else boxes.pop();
+      }
+    }
+    boxes.forEach((b, k) => { b.id = k; });
+    const rects = [];
+    const syncRects = () => { rects.length = 0; boxes.forEach((b) => { if (b.hp > 0) rects.push([b.x, b.y, b.w, b.h]); }); };
+    syncRects();
+    const A = makeArena(room, { W, H, SP: 165, PR, rects, spawn });
+    const pl = A.pl;
+    pl.forEach((p) => { p.aim = Math.atan2(H / 2 - p.y, W / 2 - p.x); p.lives = LIVES; p.inv = 0; p.cd = 0; });
+    const deathT = new Array(n).fill(0);
+    let bullets = [], t = 0;
+
+    const inBox = (x, y) => boxes.find((b) => b.hp > 0 && x > b.x - BR && x < b.x + b.w + BR && y > b.y - BR && y < b.y + b.h + BR);
+    function hit(i, by) {
+      const p = pl[i];
+      p.lives--; p.inv = INV;
+      room.send({ t: 'g', k: 'hit', i, by, l: p.lives });
+      if (p.lives <= 0) { p.alive = false; deathT[i] = t; room.eliminate(i); }
+    }
+    const scores = () => range(n).map((i) => (pl[i].alive ? 1e6 + pl[i].lives : deathT[i]));
+    function step() {
+      t += DT;
+      A.move(DT); // décrémente aussi p.cd, qui sert ici de recharge du canon
+      pl.forEach((p) => { if (p.inv > 0) p.inv -= DT; });
+      bullets.forEach((b) => {
+        b.x += b.vx * DT; b.y += b.vy * DT; b.life -= DT;
+        if (b.x < BR || b.x > W - BR) { if (b.bounce--) { b.vx = -b.vx; b.x = Math.max(BR, Math.min(W - BR, b.x)); } else b.life = 0; }
+        if (b.y < BR || b.y > H - BR) { if (b.bounce--) { b.vy = -b.vy; b.y = Math.max(BR, Math.min(H - BR, b.y)); } else b.life = 0; }
+        if (b.life <= 0) return;
+        const box = inBox(b.x, b.y);
+        if (box) {
+          b.life = 0;
+          if (!box.metal) {
+            box.hp--;
+            if (box.hp <= 0) syncRects();
+          }
+          room.send({ t: 'g', k: 'box', id: box.id, hp: box.hp, x: Math.round(b.x), y: Math.round(b.y) });
+          return;
+        }
+        for (let i = 0; i < n; i++) {
+          const p = pl[i];
+          if (!p.alive || p.inv > 0) continue;
+          if (i === b.o && b.age < 0.25) continue;
+          if (i !== b.o && room.sideOf[i] === room.sideOf[b.o]) continue; // pas de tir ami
+          if (Math.hypot(p.x - b.x, p.y - b.y) < PR + BR) { b.life = 0; hit(i, b.o); break; }
+        }
+        b.age += DT;
+      });
+      bullets = bullets.filter((b) => b.life > 0);
+      room.send({
+        t: 'g', k: 's',
+        p: pl.map((p) => [Math.round(p.x), Math.round(p.y), p.alive ? 1 : 0, Math.round(p.aim * 100), p.lives, p.inv > 0 ? 1 : 0]),
+        b: bullets.map((b) => [Math.round(b.x), Math.round(b.y), b.o]),
+      });
+      if (room.survivalOver(pl.map((p) => p.alive))) room.finish(scores());
+    }
+
+    return {
+      start() {
+        room.send({ t: 'g', k: 'tank', w: W, h: H, pr: PR, br: BR, boxes: boxes.map((b) => [b.x, b.y, b.w, b.h, b.metal ? 1 : 0, b.hp]) });
+        room.every(step, 1000 / 30);
+        room.later(() => room.finish(scores(), 'Temps écoulé : classement aux vies restantes.'), 120000);
+      },
+      input(i, m) {
+        const p = pl[i]; if (!p || !p.alive) return;
+        if (m.a === 'mv') return A.input(i, m);
+        if (m.a === 'aim') {
+          const x = Math.sign(Number(m.x) || 0), y = Math.sign(Number(m.y) || 0);
+          if (x || y) p.aim = Math.atan2(y, x);
+          return;
+        }
+        if (m.a === 'fire' && p.cd <= 0 && bullets.filter((b) => b.o === i).length < 3) {
+          p.cd = CD;
+          const cx = Math.cos(p.aim), cy = Math.sin(p.aim);
+          const x = p.x + cx * (PR + 8), y = p.y + cy * (PR + 8);
+          bullets.push({ x, y, vx: cx * BS, vy: cy * BS, o: i, life: 2.6, bounce: 1, age: 0 });
+          room.send({ t: 'g', k: 'fire', i });
+        }
+      },
+    };
+  },
+};
+
+// ───────────────────────── SYLLABES ─────────────────────────
+// Dictionnaire chargé une seule fois (≈ 336 000 mots, formes conjuguées comprises).
+let DICT = null;
+function dict() {
+  if (DICT) return DICT;
+  const words = new Set();
+  const count = new Map();
+  for (const w of require('an-array-of-french-words')) {
+    const a = norm(w);
+    if (a.length < 2 || words.has(a)) continue;
+    words.add(a);
+    // fréquence de chaque morceau de 2 ou 3 lettres (une fois par mot)
+    const seen = new Set();
+    for (let L = 2; L <= 3; L++) for (let k = 0; k + L <= a.length; k++) seen.add(a.slice(k, k + L));
+    seen.forEach((s) => count.set(s, (count.get(s) || 0) + 1));
+  }
+  // syllabes jouables, de la plus facile (présente dans le plus de mots) à la plus dure
+  const pool = [...count].filter(([s, c]) => c >= 400 && /^[a-z]+$/.test(s)).sort((x, y) => y[1] - x[1]).map(([s]) => s);
+  DICT = { words, pool };
+  return DICT;
+}
+let hasDict = true;
+try { require.resolve('an-array-of-french-words'); } catch { hasDict = false; console.warn('⚠️  an-array-of-french-words manquant (npm install) : Syllabes désactivé.'); }
+if (hasDict) setImmediate(dict);
+
+GAMES.words = {
+  icon: '🧨',
+  desc: 'Un mot avec ces lettres, vite !',
+  title: 'Syllabes',
+  min: 2,
+  rules: "Chacun son tour, une syllabe s'affiche (ex. « TRA »). Tape un mot français qui la contient (« ex-TRA-ordinaire ») puis Entrée, avant que la mèche brûle. Accents facultatifs, pas deux fois le même mot. Trop lent = tu perds une vie (2 vies). Dernier en vie gagne.",
+  create(room) {
+    const n = room.n, LIVES = 2;
+    const D = dict();
+    const lives = new Array(n).fill(LIVES);
+    const used = new Set();
+    const deathT = new Array(n).fill(0);
+    let cur = -1, syl = '', turns = 0, phase = 'idle', timer = null, t0 = Date.now();
+    const alive = () => range(n).filter((i) => lives[i] > 0);
+    const scores = () => range(n).map((i) => (lives[i] > 0 ? 1e9 + lives[i] : deathT[i]));
+
+    function newSyl() {
+      const span = Math.min(D.pool.length, 40 + turns * 12);
+      let s;
+      do { s = D.pool[ri(0, span - 1)]; } while (s === syl && span > 1);
+      syl = s;
+    }
+    function nextPlayer() {
+      const a = alive();
+      let j = cur;
+      do { j = (j + 1) % n; } while (!a.includes(j));
+      return j;
+    }
+    function turn() {
+      if (room.survivalOver(lives.map((l) => l > 0))) return room.finish(scores(), `${used.size} mots trouvés`);
+      cur = nextPlayer();
+      newSyl();
+      turns++;
+      const ms = Math.round(Math.max(6000, 12000 - turns * 150));
+      phase = 'turn';
+      room.send({ t: 'g', k: 'turn', i: cur, syl, ms, lives });
+      timer = room.later(() => boom(cur), ms);
+    }
+    function boom(i) {
+      if (phase !== 'turn' || cur !== i) return;
+      phase = 'gap';
+      lives[i]--;
+      if (lives[i] <= 0) { deathT[i] = Date.now() - t0; room.eliminate(i); }
+      room.send({ t: 'g', k: 'boom', i, lives, syl });
+      room.later(turn, 1600);
+    }
+
+    return {
+      start() {
+        room.send({ t: 'g', k: 'words', lives });
+        room.later(turn, 1200);
+      },
+      input(i, m) {
+        if (phase !== 'turn' || i !== cur) return;
+        const text = String(m.text || '').slice(0, 30);
+        if (m.a === 'type') return room.send({ t: 'g', k: 'type', i, text });
+        if (m.a !== 'word') return;
+        const w = norm(text);
+        let bad = null;
+        if (!w.includes(syl)) bad = `Il manque « ${syl.toUpperCase()} » !`;
+        else if (used.has(w)) bad = 'Déjà utilisé !';
+        else if (!D.words.has(w)) bad = 'Mot inconnu…';
+        if (bad) return room.send({ t: 'g', k: 'nope', i, text, msg: bad });
+        room.cancel(timer);
+        used.add(w);
+        phase = 'gap';
+        room.send({ t: 'g', k: 'ok', i, text });
+        room.later(turn, 500);
+      },
+    };
+  },
+};
+
+if (!hasDict) delete GAMES.words;
 
 module.exports = { GAMES, shuffle, ri };

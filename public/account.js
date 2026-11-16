@@ -42,6 +42,18 @@ function onAccountMsg(m) {
       $('#aErr').textContent = m.msg;
       shake($('#acctOut'));
       break;
+    case 'acctOk':
+      if (m.k === 'forgot') { $('#aErr').textContent = ''; toast('📧 ' + esc(m.msg), [], 10000); showAuthForm(); }
+      else if (m.k === 'reset') { $('#resetModal').classList.add('hidden'); toast('🔑 ' + esc(m.msg)); }
+      else { $('#mErr').textContent = ''; $('#mPass').value = ''; toast(esc(m.msg)); }
+      SFX.play('ok');
+      break;
+    case 'acctErr': {
+      const box = m.k === 'reset' ? '#rErr' : m.k === 'rename' || m.k === 'email' ? '#mErr' : '#aErr';
+      $(box).textContent = m.msg;
+      shake($(box).parentElement);
+      break;
+    }
     case 'friends':
       friendsData = m;
       renderFriends();
@@ -90,8 +102,69 @@ function renderAccount() {
       </div>
     </div>
     <div class="statsrow"><span>🎮 ${st.matches} partie${st.matches > 1 ? 's' : ''}</span><span>🏆 ${st.wins} victoire${st.wins > 1 ? 's' : ''}</span><span>⭐ ${st.rounds} manches gagnées</span></div>
-    <div class="row" style="margin-top:12px"><button class="btn pink" data-act="custom">🎨 Personnaliser</button><button class="btn white sm" data-act="logout">Déconnexion</button></div>`;
+    ${me.email ? '' : `<div class="mailwarn">⚠️ Ton compte n'a pas d'email : sans lui, impossible de le récupérer si tu oublies ton mot de passe.
+      <div style="margin-top:6px"><button class="btn sm blue" data-act="account">✉️ Ajouter mon email</button></div></div>`}
+    <div class="row" style="margin-top:12px"><button class="btn pink" data-act="custom">🎨 Personnaliser</button><button class="btn white sm" data-act="account">⚙️ Compte</button><button class="btn white sm" data-act="logout">Déconnexion</button></div>`;
+  if (!$('#acctModal').classList.contains('hidden')) fillAccountModal();
 }
+
+// ════════════════ mon compte : pseudo, email ════════════════
+function fillAccountModal() {
+  if (document.activeElement !== $('#mName')) $('#mName').value = me.name;
+  if (document.activeElement !== $('#mEmail')) $('#mEmail').value = me.email || '';
+  $('#btnEmail').textContent = me.email ? "Changer l'email" : "Enregistrer l'email";
+}
+function openAccount() {
+  if (!me) return;
+  $('#mErr').textContent = ''; $('#mPass').value = '';
+  $('#acctModal').classList.remove('hidden');
+  fillAccountModal();
+  if (!me.email) $('#mEmail').focus();
+}
+$('#acctModal').addEventListener('click', (e) => { if (e.target.id === 'acctModal' || e.target.closest('#acctClose')) $('#acctModal').classList.add('hidden'); });
+$('#btnRename').onclick = () => {
+  const name = $('#mName').value.trim();
+  if (name && me && name !== me.name) send({ t: 'rename', name });
+};
+$('#mName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnRename').click(); });
+$('#btnEmail').onclick = () => {
+  const email = $('#mEmail').value.trim(), pass = $('#mPass').value;
+  if (!email || !pass) { $('#mErr').textContent = 'Email et mot de passe actuel requis.'; return; }
+  send({ t: 'setEmail', email, pass });
+};
+$('#mPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnEmail').click(); });
+
+// ════════════════ mot de passe oublié ════════════════
+function showAuthForm() { $('#forgotForm').classList.add('hidden'); $('#authForm').classList.remove('hidden'); }
+$('#btnForgot').onclick = () => {
+  $('#aErr').textContent = '';
+  $('#authForm').classList.add('hidden'); $('#forgotForm').classList.remove('hidden');
+  const v = $('#aName').value.trim();
+  if (v.includes('@')) $('#fEmail').value = v;
+  $('#fEmail').focus();
+};
+$('#btnForgotBack').onclick = () => { $('#aErr').textContent = ''; showAuthForm(); };
+$('#btnSendReset').onclick = () => {
+  const email = $('#fEmail').value.trim();
+  if (!email.includes('@')) { $('#aErr').textContent = 'Entre ton adresse email.'; return; }
+  send({ t: 'forgot', email });
+};
+$('#fEmail').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnSendReset').click(); });
+// lien reçu par email : /?reset=JETON
+const resetToken = new URLSearchParams(location.search).get('reset');
+if (resetToken) {
+  history.replaceState(null, '', location.pathname);
+  $('#resetModal').classList.remove('hidden');
+  $('#rPass').focus();
+}
+$('#btnReset').onclick = () => {
+  const a = $('#rPass').value, b = $('#rPass2').value;
+  if (a.length < 4) { $('#rErr').textContent = 'Mot de passe : 4 caractères minimum.'; return; }
+  if (a !== b) { $('#rErr').textContent = 'Les deux mots de passe ne sont pas identiques.'; return; }
+  send({ t: 'resetPass', token: resetToken, pass: a });
+};
+$('#rPass2').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnReset').click(); });
+$('#btnResetCancel').onclick = () => $('#resetModal').classList.add('hidden');
 
 $('#acct').addEventListener('click', (e) => {
   const tab = e.target.closest('[data-tab]');
@@ -100,17 +173,24 @@ $('#acct').addEventListener('click', (e) => {
     document.querySelectorAll('#acct .tab').forEach((x) => x.classList.toggle('on', x === tab));
     $('#btnAuth').textContent = authMode === 'login' ? 'Se connecter' : 'Créer mon compte';
     $('#aPass').autocomplete = authMode === 'login' ? 'current-password' : 'new-password';
+    $('#aName').placeholder = authMode === 'login' ? 'Pseudo ou email' : 'Pseudo';
+    $('#aName').maxLength = authMode === 'login' ? 254 : 16;
+    $('#aEmail').classList.toggle('hidden', authMode === 'login');
+    $('#btnForgot').classList.toggle('hidden', authMode !== 'login');
     $('#aErr').textContent = '';
+    showAuthForm();
   }
   const act = e.target.closest('[data-act]');
   if (act && act.dataset.act === 'custom') openCustom();
+  if (act && act.dataset.act === 'account') openAccount();
   if (act && act.dataset.act === 'logout') { store.del('clutch-token'); send({ t: 'logout' }); friendsData = null; renderFriends(); }
 });
 function doAuth() {
-  const name = $('#aName').value.trim(), pass = $('#aPass').value;
+  const name = $('#aName').value.trim(), pass = $('#aPass').value, email = $('#aEmail').value.trim();
   if (!name || !pass) { $('#aErr').textContent = 'Pseudo et mot de passe requis.'; return; }
+  if (authMode === 'register' && !email) { $('#aErr').textContent = 'Email requis (pour récupérer ton compte).'; return; }
   SFX.unlock();
-  send({ t: authMode, name, pass });
+  send(authMode === 'register' ? { t: 'register', name, pass, email } : { t: 'login', name, pass });
 }
 $('#btnAuth').onclick = doAuth;
 $('#aPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doAuth(); });
