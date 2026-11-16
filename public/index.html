@@ -102,6 +102,8 @@
   .stepper .n { font-family: var(--display); font-size: 40px; min-width: 64px; text-align: center; background: #fff; border: 3px solid var(--line); border-radius: 16px; line-height: 1.3; }
   .stepper .btn { width: 48px; padding: 8px 0; font-size: 24px; }
   .roundsinfo { color: var(--ink2); font-size: 14px; flex-basis: 100%; }
+  .goaltabs { display: flex; gap: 6px; flex-basis: 100%; }
+  .goaltabs .tab { font-size: 14px; padding: 6px; }
   .gamegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .gcard { position: relative; background: #fff; border: 3px solid var(--line); border-radius: 18px; padding: 10px; cursor: pointer; box-shadow: 0 4px 0 var(--line);
     transition: transform .12s, filter .12s; text-align: left; font-family: var(--body); color: var(--ink); }
@@ -157,6 +159,20 @@
   #ovTitle.stroke { color: var(--c); -webkit-text-stroke: 2.5px var(--line); paint-order: stroke fill; text-shadow: 0 4px 0 var(--line); }
   .decisive { display: inline-block; background: var(--red); color: #fff; font-family: var(--display); padding: 4px 14px; border: 3px solid var(--line); border-radius: 12px; margin-bottom: 8px; transform: rotate(-3deg); }
   #ovText { color: var(--ink2); font-size: 17px; line-height: 1.45; margin: 6px auto 0; max-width: 520px; }
+  #ovText.goal { background: #fff; border: 2.5px solid var(--line); border-radius: 14px; padding: 10px 14px; text-align: left; font-size: 16px; }
+  #ovText.goal::before, .keys::before { display: block; font-family: var(--display); font-size: 13px; letter-spacing: 1px; color: var(--mut); margin-bottom: 4px; }
+  #ovText.goal::before { content: '🎯 BUT DU JEU'; }
+  .keys { display: grid; gap: 6px; max-width: 520px; margin: 10px auto 0; text-align: left; background: #fff3c4; border: 2.5px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+  .keys::before { content: '🎮 COMMANDES'; }
+  .krow { display: grid; grid-template-columns: minmax(130px, auto) 1fr; gap: 12px; align-items: center; }
+  .kk { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+  kbd { font-family: var(--display); min-width: 32px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; background: #fff;
+    border: 2.5px solid var(--line); border-bottom-width: 5px; border-radius: 8px; font-size: 15px; color: var(--ink); line-height: 1; }
+  .kor { color: var(--mut); font-size: 12px; padding: 0 2px; }
+  .ka { font-size: 15px; font-weight: 800; color: var(--ink); }
+  .ktouch { font-size: 14px; color: var(--ink2); grid-column: 1 / -1; border-top: 2px dashed rgba(27,20,64,.2); padding-top: 6px; }
+  .gmrow .keys { margin: 8px 0 0; max-width: none; background: #fffbe8; }
+  @media (max-width: 520px) { .krow { grid-template-columns: 1fr; gap: 2px; } .kk { justify-content: flex-start; } }
   #ovCount { margin: 14px auto 0; }
   .countbub { width: 96px; height: 96px; margin: 0 auto; border-radius: 50%; background: var(--pink); border: 4px solid var(--line); box-shadow: 0 6px 0 var(--line);
     font-family: var(--display); font-size: 56px; color: #fff; -webkit-text-stroke: 2px var(--line); paint-order: stroke fill; display: flex; align-items: center; justify-content: center; animation: popin .3s; }
@@ -286,8 +302,13 @@
   .cpal .cdot small { position: absolute; bottom: -20px; left: 0; right: 0; font-size: 11px; color: var(--mut); }
   .chist { display: grid; gap: 6px; margin-top: 14px; justify-items: center; }
   .chist .cdot { width: 26px; height: 26px; border-width: 2.5px; }
-  .peg { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); display: inline-block; background: transparent; opacity: .25; }
+  .peg { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); display: inline-block; background: transparent; opacity: .3; }
   .peg.b { background: var(--line); opacity: 1; } .peg.w { background: #fff; opacity: 1; }
+  .pegs { display: inline-flex; gap: 4px; margin-left: 8px; padding: 4px 6px; background: #c9c2ea; border: 2px solid var(--line); border-radius: 10px; }
+  .chrow { justify-content: flex-start; width: min(100%, 470px); background: #fff; border: 2px solid var(--line); border-radius: 12px; padding: 4px 8px; }
+  .cn { width: 26px; text-align: right; }
+  .csay { font-size: 13px; font-weight: 800; color: var(--ink2); }
+  .chead { font-size: 12px; color: var(--mut); text-align: center; max-width: 470px; }
   .msgrid { display: grid; gap: 3px; width: min(100%, 660px); margin: 0 auto; touch-action: manipulation; user-select: none; }
   .msgrid button { aspect-ratio: 1; border: 2px solid var(--line); border-radius: 6px; background: #b9b0e6; box-shadow: inset 0 -3px 0 rgba(27,20,64,.25); font-family: var(--display); font-size: clamp(11px, 2.3vw, 19px); padding: 0; line-height: 1; cursor: pointer; }
   .msgrid button.o { background: #fff; box-shadow: none; cursor: default; }
@@ -481,7 +502,7 @@
       </div>
       <div class="card">
         <div class="section"><div class="lbl">🎮 Mode</div><div id="modes" class="modes"></div></div>
-        <div class="section"><div class="lbl">🔁 Nombre de manches</div><div id="rounds" class="rounds"></div></div>
+        <div class="section"><div class="lbl">🏁 Fin de la partie</div><div id="rounds" class="rounds"></div></div>
         <div class="section"><div class="lbl">🎲 Mini-jeux <span class="mut" style="text-transform:none;letter-spacing:0;font-family:var(--body)">— clique pour activer / désactiver</span></div><div id="gamesList" class="gamegrid"></div></div>
         <div class="startbar">
           <button id="btnStart" class="btn big green">🚀 Lancer la partie</button>
@@ -507,6 +528,7 @@
     <h2 id="ovTitle"></h2>
     <div id="ovGag"></div>
     <p id="ovText"></p>
+    <div id="ovKeys"></div>
     <div id="ovList"></div>
     <div id="ovXp"></div>
     <div id="ovReady"></div>

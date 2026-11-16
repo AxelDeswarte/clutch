@@ -51,11 +51,13 @@ const GAMES = {};
 
 // ───────────────────────── RÉFLEXE ─────────────────────────
 GAMES.reflex = {
+  keys: [[[['Espace'], ['Clic']], 'dégainer au cri « FEU ! » (pas avant !)']],
+  touch: 'tape sur le cowboy',
   icon: '🤠',
   desc: 'Dégaine au signal, pas avant',
   title: 'Duel au soleil',
   min: 2,
-  rules: "Main sur le flingue. Au cri « FEU ! », ESPACE (ou tap) le plus vite possible. Méfie-toi des faux signaux (FEUILLE, FOU…) : dégainer avant le vrai = le shérif t'abat.",
+  rules: "Main sur le flingue. Au cri « FEU ! », dégaine le plus vite possible. Méfie-toi des faux signaux (FEUILLE, FOU…) : dégainer avant le vrai = le shérif t'abat.",
   create(room) {
     const n = room.n;
     const t = new Array(n).fill(null);
@@ -110,11 +112,13 @@ GAMES.reflex = {
 
 // ───────────────────────── ESCALATOR ─────────────────────────
 GAMES.seq = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'taper la flèche affichée en grand']],
+  touch: 'flèches sous le jeu',
   icon: '🛗',
   desc: 'Tape les flèches, le broyeur monte',
   title: 'Escalator',
   min: 2,
-  rules: "Tu montes un escalator… avec un broyeur juste en dessous. Tape les flèches affichées (flèches / ZQSD) : bonne touche = tu montes, mauvaise = tu glisses vers les lames. Arrive en haut avant d'être haché.",
+  rules: "Tu montes un escalator… avec un broyeur juste en dessous. Bonne flèche = tu montes, mauvaise = tu glisses vers les lames. Arrive en haut avant d'être haché.",
   create(room) {
     const n = room.n, TOP = 40, DT = 0.1;
     const seq = Array.from({ length: 80 }, () => pick(DIRS));
@@ -155,11 +159,13 @@ GAMES.seq = {
 
 // ───────────────────────── TRON ─────────────────────────
 GAMES.tron = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'tourner (on ne peut pas faire demi-tour)']],
+  touch: 'flèches sous le jeu',
   icon: '🏍️',
   desc: "Coince les autres avec ton trait",
   title: 'Tron',
   min: 2,
-  rules: 'Dirige ton trait (flèches ou ZQSD). Touche un bord ou un trait = éliminé. Coince les autres ! Ça continue jusqu\'au dernier survivant, même en équipe.',
+  rules: "Ton trait avance tout seul et laisse un mur derrière lui. Touche un bord ou un trait = éliminé. Coince les autres ! Ça continue jusqu'au dernier survivant, même en équipe.",
   create(room) {
     const n = room.n;
     const W = n <= 2 ? 48 : 64, H = n <= 2 ? 32 : 42, TICK = 65;
@@ -221,11 +227,12 @@ GAMES.tron = {
 
 // ───────────────────────── MÉMOIRE ─────────────────────────
 GAMES.memory = {
+  keys: [[[['Clic']], 'cliquer les cases dans l\'ordre où elles se sont allumées']],
   icon: '🧠',
   desc: "Reproduis la séquence dans l'ordre",
   title: 'Mémoire',
   min: 2,
-  rules: "Des cases s'allument une par une : reclique-les DANS LE MÊME ORDRE. Chaque niveau ajoute une case au bout de la séquence et accélère. Une erreur ou trop lent = une balle. Ça continue jusqu'au dernier survivant, même en équipe.",
+  rules: "Des cases s'allument une par une : reclique-les DANS LE MÊME ORDRE. Chaque niveau ajoute une case et accélère. Une erreur ou trop lent = éliminé. Dernier survivant gagne, même en équipe.",
   create(room) {
     const G = 5, n = room.n;
     const alive = new Array(n).fill(true);
@@ -290,11 +297,13 @@ GAMES.memory = {
 
 // ───────────────────────── ESQUIVE ─────────────────────────
 GAMES.dodge = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer le joueur le plus proche']],
+  touch: 'flèches + bouton 💥 sous le jeu',
   icon: '🪚',
   desc: 'Esquive les scies et les lasers',
   title: 'Lames',
   min: 2,
-  rules: "Des scies circulaires ricochent partout, puis des lasers balaient la salle. Flèches / ZQSD pour bouger, ESPACE pour bousculer le joueur le plus proche. Les contours en pointillés ne coupent pas encore. Dernier entier gagne.",
+  rules: "Des scies circulaires ricochent partout, puis des lasers balaient la salle. Les contours en pointillés ne coupent pas encore. Dernier entier gagne.",
   create(room) {
     const n = room.n, W = 800, H = 500, PR = 11, DT = 1 / 30;
     const A = makeArena(room, { W, H, SP: 240, PR, spawn: circleSpawn(W, H, 170, 120) });
@@ -366,11 +375,13 @@ GAMES.dodge = {
 
 // ───────────────────────── COURSE DE HAIES ─────────────────────────
 GAMES.race = {
+  keys: [[[['⬅', '➡'], ['Q', 'D']], 'alterner vite pour courir'], [[['⬆'], ['Z'], ['Espace']], 'sauter une haie']],
+  touch: 'boutons ⬅ ⬆ ➡ sous le jeu',
   icon: '🏃',
   desc: "Course de haies au clavier",
   title: 'Course de haies',
   min: 2,
-  rules: 'Alterne ← → (ou Q / D) le plus vite possible pour courir. Saute les haies avec ↑ / Z / Espace. Une haie prise = gros ralentissement.',
+  rules: "Course de haies : alterne gauche / droite le plus vite possible pour courir, et saute les haies. Une haie prise = gros ralentissement.",
   create(room) {
     const n = room.n, L = 4200, DT = 1 / 30;
     const hurdles = [];
@@ -491,11 +502,13 @@ const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex
 // emojis anciens uniquement : les récents (🪛…) ne s'affichent pas partout (Windows 10)
 const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🔨', 'Marteau'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
 GAMES.filter = {
+  keys: [[[['⬅'], ['Q']], '🔥 four : la ferraille 🔩 ⚙️ 🔧'], [[['➡'], ['D']], '📦 caisse : les tableaux 🖼️']],
+  touch: 'gros boutons au-dessus du tapis',
   icon: '🔥',
   desc: 'Trie le plus vite possible en 40 s',
   title: 'Le Filtre',
   min: 2,
-  rules: "Ton tapis avance à TON rythme et ne s'arrête jamais : chaque objet trié fait venir le suivant. ⬅ ou Q = 🔥 FOUR pour la FERRAILLE 🔩 · ➡ ou D = 📦 CAISSE pour les TABLEAUX 🖼️. Une erreur = tu es sonné 1,5 s. 40 secondes : celui qui en a trié le plus gagne.",
+  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les tableaux en caisse. Une erreur = tu es sonné 1,5 s. 40 secondes : celui qui en a trié le plus gagne.",
   create(room) {
     const n = room.n, N = 400, STUN = 1500, DUR = 40000;
     const items = Array.from({ length: N }, () => {
@@ -537,11 +550,13 @@ GAMES.filter = {
 // ───────────────────────── SOL INSTABLE ─────────────────────────
 const FLOOR_SYM = ['💀', '🔪', '🩸', '👁️'];
 GAMES.floor = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer le joueur le plus proche']],
+  touch: 'flèches + bouton 💥 sous le jeu',
   icon: '🕳️',
   desc: 'Reste sur le bon symbole, pousse les autres',
   title: 'Sol instable',
   min: 2,
-  rules: "Le symbole affiché est le seul sol qui tient. À la sirène, tout le reste s'effondre. Flèches / ZQSD pour bouger, ESPACE pour bousculer le joueur le plus proche (dans le vide, de préférence). Dernier debout gagne.",
+  rules: "Le symbole affiché est le seul sol qui tient. À la sirène, tout le reste s'effondre. Pousse les autres dans le vide ! Dernier debout gagne.",
   create(room) {
     const n = room.n, C = 8, R = 6, T = 80, W = C * T, H = R * T, DT = 1 / 30;
     const A = makeArena(room, { W, H, SP: 220, PR: 12, spawn: circleSpawn(W, H, 170, 110) });
@@ -595,11 +610,13 @@ GAMES.floor = {
 
 // ───────────────────────── PAUSE CLOPE ─────────────────────────
 GAMES.smoke = {
+  keys: [[[['Espace']], 'MAINTENIR pour tirer, RELÂCHER dans la zone verte']],
+  touch: 'maintiens le gros bouton',
   icon: '🚬',
   desc: 'Tire sur ta clope sans tousser',
   title: 'Pause clope',
   min: 2,
-  rules: "Maintiens ESPACE pour tirer, relâche dans la zone verte = une taffe. Trop long = tu tousses (bloqué 1,5 s). Trop court = taffe gâchée. Ça va vite et chaque taffe a son propre rythme. 25 secondes : le pire fumeur se fait abattre.",
+  rules: "Tire sur ta clope et relâche pile dans la zone verte = une taffe. Trop long = tu tousses (bloqué 1,5 s). Trop court = taffe gâchée. Chaque taffe a son propre rythme. 25 secondes : le pire fumeur se fait abattre.",
   create(room) {
     const n = room.n, LO = 75, HI = 93;
     const st = range(n).map(() => ({ s: 'idle', t: 0, fill: 1400, tm: null }));
@@ -644,11 +661,13 @@ GAMES.smoke = {
 
 // ───────────────────────── BONNES MANIÈRES ─────────────────────────
 GAMES.manners = {
+  keys: [[[['Espace']], 'MAINTENIR pour manger, RELÂCHER quand Tonton regarde']],
+  touch: 'maintiens le gros bouton',
   icon: '🍽️',
   desc: 'Mange quand Tonton ne regarde pas',
   title: 'Bonnes manières',
   min: 2,
-  rules: "Maintiens ESPACE pour bouffer. Quand Tonton Gérard baisse son journal, ARRÊTE-TOI ou il te flingue à table. Il froisse son journal juste avant. Premier à finir son assiette gagne.",
+  rules: "Mange ton assiette… mais quand Tonton Gérard baisse son journal, ARRÊTE-TOI ou il te flingue à table. Il froisse son journal juste avant. Premier à finir son assiette gagne.",
   create(room) {
     const n = room.n, DT = 0.05, RATE = 11;
     const pr = new Array(n).fill(0), eat = new Array(n).fill(false), alive = new Array(n).fill(true), deathT = new Array(n).fill(0);
@@ -692,6 +711,8 @@ GAMES.manners = {
 
 // ───────────────────────── L'ARAIGNÉE ─────────────────────────
 GAMES.bomb = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer']],
+  touch: 'flèches sous le jeu',
   icon: '🕷️',
   desc: "Refile l'araignée-bombe avant qu'elle pète",
   title: "L'Araignée",
@@ -737,11 +758,13 @@ GAMES.bomb = {
 
 // ───────────────────────── CHAMP DE MINES ─────────────────────────
 GAMES.mines = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer un joueur (sur une mine, c\'est cadeau)'], [[['Immobile 1 s']], 'sonar : révèle les mines proches']],
+  touch: 'flèches + bouton 💥 sous le jeu',
   icon: '💥',
   desc: 'Traverse, la moissonneuse arrive',
   title: 'Champ de mines',
   min: 2,
-  rules: "Traverse jusqu'à la sortie (à droite). Les mines sont invisibles : reste immobile 1 s pour les détecter autour de toi. Une moissonneuse te court après. ESPACE = bousculer un joueur (sur une mine, c'est cadeau).",
+  rules: "Traverse jusqu'à la sortie (à droite) avant la moissonneuse. Les mines sont invisibles : reste IMMOBILE 1 s pour les détecter autour de toi.",
   create(room) {
     const n = room.n, L = 2600, H = 420, DT = 1 / 30, MR = 16, BLAST = 38;
     const A = makeArena(room, { W: L, H, SP: 190, PR: 12, spawn: (i, nn) => [60, H * (i + 1) / (nn + 1)] });
@@ -802,6 +825,7 @@ const UC_PAIRS = [
 const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 
 GAMES.undercover = {
+  keys: [[[['Clavier'], ['Entrée']], 'écrire UN mot d\'indice et l\'envoyer'], [[['Clic']], 'voter contre un joueur (ou 🎯 deviner en duel)']],
   icon: '🕵️',
   desc: "Trouve l'intrus (vocal conseillé)",
   title: 'Undercover',
@@ -987,11 +1011,13 @@ function undercoverDuel(room) {
 
 // ───────────────────────── TANK ─────────────────────────
 GAMES.tank = {
+  keys: [[[['Z', 'Q', 'S', 'D']], 'rouler'], [[['⬆', '⬇', '⬅', '➡']], 'orienter le canon'], [[['Espace']], 'tirer (maintenir = rafale)']],
+  touch: 'le pad roule ET vise, bouton 💥 pour tirer',
   icon: '🪖',
   desc: 'ZQSD pour rouler, flèches pour viser, 2 vies',
   title: 'Tank',
   min: 2,
-  rules: "ZQSD pour rouler, FLÈCHES pour orienter le canon, ESPACE pour tirer. Les obus rebondissent une fois sur les murs. Les caisses en bois cassent en 3 tirs, les blocs en métal jamais. 2 vies chacun, pas de tir ami en équipe. Dernier camp debout gagne.",
+  rules: "Les obus rebondissent une fois sur les murs. Les caisses en bois cassent en 3 tirs, les blocs en métal jamais. 2 vies chacun, pas de tir ami en équipe. Dernier camp debout gagne.",
   create(room) {
     const n = room.n, W = 800, H = 500, DT = 1 / 30, PR = 15;
     const BS = 430, BR = 5, CD = 0.45, LIVES = 2, INV = 1.5;
@@ -1121,11 +1147,12 @@ try { require.resolve('an-array-of-french-words'); } catch { hasDict = false; co
 if (hasDict) setImmediate(dict);
 
 GAMES.words = {
+  keys: [[[['Clavier']], 'taper un mot qui contient la syllabe'], [[['Entrée']], 'valider']],
   icon: '🧨',
   desc: 'Un mot avec ces lettres, vite !',
   title: 'Syllabes',
   min: 2,
-  rules: "Chacun son tour, une syllabe s'affiche (ex. « TRA »). Tape un mot français qui la contient (« ex-TRA-ordinaire ») puis Entrée, avant que la mèche brûle. Accents facultatifs, pas deux fois le même mot. Trop lent = tu perds une vie (2 vies). Dernier en vie gagne.",
+  rules: "Chacun son tour, une syllabe s'affiche (ex. « TRA »). Trouve un mot français qui la contient (« ex-TRA-ordinaire ») avant que la mèche brûle. Accents facultatifs, pas deux fois le même mot. Trop lent = une vie en moins (2 vies). Dernier en vie gagne.",
   create(room) {
     const n = room.n, LIVES = 2;
     const D = dict();
@@ -1208,31 +1235,42 @@ function buildTrack() {
     for (let k = 0; k < leave; k++) segs.push({ c: easeInOut(curve, 0, k / leave), y: easeInOut(y0, y1, (enter + hold + k) / tot), b: 0 });
   };
   const boost = () => { const side = ri(1, 2), at = segs.length - ri(8, 20); for (let k = at; k < at + 4; k++) if (segs[k]) segs[k].b = side; };
+  // obstacles (cônes) : x = position sur la largeur de la route (-1 bord gauche, 1 bord droit)
+  const obs = [];
+  const cone = (k, x) => { if (segs[k] && !segs[k].b) obs.push([k, x]); };
+  const slalom = (from, len) => { let side = pick([-1, 1]); for (let k = from; k < from + len; k += 14) { cone(k, side * 0.5); side = -side; } };
+  const wall = (k) => { const side = pick([-1, 1]); [0.2, 0.5, 0.8].forEach((x) => cone(k, side * x)); }; // bloque une moitié
   add(0, 40, 0, 0, 0);
   while (segs.length < 1550) {
-    const L = pick([25, 40, 50]), dir = pick([-1, 1]);
-    switch (ri(0, 5)) {
-      case 0: add(10, L, 10, 0, 0); boost(); break;                                  // ligne droite + boost
-      case 1: add(L / 2, L, L / 2, dir * ri(2, 4), pick([0, 0, 20, -20])); break;    // virage large
-      case 2: add(L / 2, L / 2, L / 2, dir * ri(5, 6), 0); break;                     // épingle
-      case 3: add(20, 20, 20, dir * 3, 0); add(20, 20, 20, -dir * 3, 0); break;       // S
-      case 4: add(L, 0, L, 0, pick([30, -30, 50])); add(L, 0, L, 0, pick([-30, 30, -50])); break; // bosses
+    const L = pick([25, 40, 50]), dir = pick([-1, 1]), at = segs.length;
+    switch (ri(0, 8)) {
+      case 0: add(10, L, 10, 0, 0); boost(); slalom(at + 6, L - 10); break;                 // ligne droite : turbo + slalom
+      case 1: add(L / 2, L, L / 2, dir * ri(3, 5), pick([0, 0, 20, -20])); cone(at + L, -dir * 0.6); break; // virage + cône à l'extérieur
+      case 2: add(L / 2, L / 2, L / 2, dir * ri(5, 6), 0); break;                            // épingle
+      case 3: add(15, 15, 15, dir * 4, 0); add(15, 15, 15, -dir * 4, 0); break;              // S serré
+      case 4: add(10, 8, 10, dir * 5, 0); add(10, 8, 10, -dir * 5, 0); add(10, 8, 10, dir * 5, 0); break; // chicane
+      case 5: add(L, 0, L, 0, pick([30, -30, 50])); wall(at + L); add(L, 0, L, 0, pick([-30, 30, -50])); break; // bosse + mur caché derrière
+      case 6: add(L / 2, L / 2, L / 2, dir * 6, 0); add(L / 2, L / 2, L / 2, dir * 5, 0); break; // double épingle (demi-tour)
+      case 7: add(10, 30, 10, 0, 0); wall(at + 15); wall(at + 35); break;                    // deux murs en quinconce
       default: add(20, 30, 20, dir * ri(2, 4), pick([40, -40])); boost(); break;
     }
   }
   add(0, 60, 0, 0, 0);
-  return segs;
+  // pas d'obstacle au départ ni dans la dernière ligne droite
+  return { segs, obs: obs.filter(([k]) => k > 50 && k < segs.length - 70).sort((a, b) => a[0] - b[0]) };
 }
 
 GAMES.circuit = {
+  keys: [[[['⬆'], ['Z']], 'accélérer'], [[['⬇'], ['S']], 'freiner'], [[['⬅', '➡'], ['Q', 'D']], 'tourner']],
+  touch: 'boutons ⬅ ➡ 🛑 GAZ sous la route',
   icon: '🏎️',
   desc: 'Course en vue pilote, au chrono',
   title: 'Circuit',
   min: 2,
-  rules: "Vue pilote ! ⬆ / Z = accélérer, ⬇ / S = freiner, ⬅ ➡ / Q D = tourner. Dans les virages la voiture part vers l'extérieur : braque avant. L'herbe te ralentit énormément. Les flèches jaunes au sol = TURBO. Les autres voitures sont des fantômes (pas de collision). Premier à la ligne d'arrivée gagne.",
+  rules: "Course en vue pilote. Dans les virages la voiture part vers l'extérieur : braque AVANT. L'herbe te ralentit énormément et les obstacles 🚧 te stoppent net. Les flèches jaunes au sol = TURBO. Les autres voitures sont des fantômes. Premier à la ligne d'arrivée gagne.",
   create(room) {
     const n = room.n, DT = 1 / 30;
-    const track = buildTrack(), LEN = track.length * RSEG - RSEG * 30;
+    const { segs: track, obs } = buildTrack(), LEN = track.length * RSEG - RSEG * 30;
     const pl = range(n).map((i) => ({ z: 0, x: n === 1 ? 0 : -0.6 + (1.2 * i) / Math.max(1, n - 1), sp: 0, th: 0, br: 0, st: 0, boost: 0 }));
     const race = new Race(room);
     let t = 0;
@@ -1258,14 +1296,24 @@ GAMES.circuit = {
         if (p.boost > 0) p.boost -= DT;
         p.x = Math.max(-2.5, Math.min(2.5, p.x));
         p.sp = Math.max(0, Math.min(max, p.sp));
+        const z0 = p.z;
         p.z += p.sp * DT;
+        // obstacle franchi pendant ce pas et assez proche sur la largeur = choc
+        for (const [k, ox] of obs) {
+          const oz = k * RSEG + RSEG / 2;
+          if (oz > p.z) break;
+          if (oz > z0 && Math.abs(p.x - ox) < 0.3) {
+            p.sp *= 0.2; p.boost = 0;
+            room.send({ t: 'g', k: 'crash', i });
+          }
+        }
         if (p.z >= LEN) { p.time = t; room.send({ t: 'g', k: 'fin', i, tm: +t.toFixed(2) }); race.finish(i, end); }
       });
       room.send({ t: 'g', k: 's', tm: +t.toFixed(2), p: pl.map((p, i) => [Math.round(p.z), Math.round(p.x * 100), Math.round(p.sp), race.done[i] ? 1 : 0, p.boost > 0 ? 1 : 0]) });
     }
     return {
       start() {
-        room.send({ t: 'g', k: 'track', seg: RSEG, max: RMAX, len: LEN, s: track.map((s) => [+s.c.toFixed(2), Math.round(s.y), s.b]) });
+        room.send({ t: 'g', k: 'track', seg: RSEG, max: RMAX, len: LEN, s: track.map((s) => [+s.c.toFixed(2), Math.round(s.y), s.b]), o: obs });
         room.every(step, 1000 / 30);
         room.later(end, 120000);
       },
@@ -1281,11 +1329,12 @@ GAMES.circuit = {
 
 // ───────────────────────── CODE SECRET (logique) ─────────────────────────
 GAMES.code = {
+  keys: [[[['Clic'], ['1', '…', '6']], 'ajouter une couleur'], [[['⌫']], 'effacer la dernière'], [[['Entrée']], 'proposer la combinaison']],
   icon: '🔐',
   desc: 'Casse le code couleur en premier',
   title: 'Code secret',
   min: 2,
-  rules: "Un code secret de 4 couleurs (parmi 6, une couleur peut revenir), le même pour tout le monde. Propose une combinaison : ⚫ = bonne couleur bien placée, ⚪ = bonne couleur mal placée. 10 essais max. Le premier qui casse le code gagne, sinon le plus proche.",
+  rules: "Un code secret de 4 couleurs (parmi 6, une couleur peut revenir), le même pour tout le monde. Après chaque essai : ⚫ = une couleur bien placée, ⚪ = une couleur présente mais mal placée. Les pions ne disent PAS lesquelles ! 10 essais. Le premier qui casse le code gagne, sinon le plus proche.",
   create(room) {
     const n = room.n, LEN = 4, COLS = 6, MAXT = 10;
     const code = range(LEN).map(() => ri(0, COLS - 1));
@@ -1317,11 +1366,13 @@ GAMES.code = {
 
 // ───────────────────────── SERPENTS ─────────────────────────
 GAMES.snake = {
+  keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'tourner']],
+  touch: 'flèches sous le jeu',
   icon: '🐍',
   desc: 'Mange, grandis, ne te mords pas',
   title: 'Serpents',
   min: 2,
-  rules: "Flèches ou ZQSD. Mange les fruits pour grandir. Toucher un mur, ton corps ou un autre serpent = mort (deux têtes qui se cognent : les deux meurent). Un serpent mort se transforme en fruits. Dernier en vie gagne, sinon le plus long au bout de 90 s.",
+  rules: "Mange les fruits pour grandir. Toucher un mur, ton corps ou un autre serpent = mort (deux têtes qui se cognent : les deux meurent). Un serpent mort se transforme en fruits. Dernier en vie gagne, sinon le plus long au bout de 90 s.",
   create(room) {
     const n = room.n;
     const W = n <= 2 ? 32 : 40, H = n <= 2 ? 22 : 28, TICK = 115;
@@ -1396,11 +1447,13 @@ GAMES.snake = {
 
 // ───────────────────────── ENVOL ─────────────────────────
 GAMES.flap = {
+  keys: [[[['Espace'], ['⬆'], ['Clic']], 'battre des ailes (un coup = un saut)']],
+  touch: 'tape sur le jeu',
   icon: '🪶',
   desc: 'Un seul bouton : battre des ailes',
   title: 'Envol',
   min: 2,
-  rules: "Un seul bouton : ESPACE, clic ou tap pour battre des ailes. Passe dans les trous entre les cheminées sans les toucher ni tomber. Ça accélère. Tout le monde a les mêmes cheminées. Dernier en vol gagne.",
+  rules: "Passe dans les trous entre les cheminées sans les toucher ni tomber. Ça accélère. Tout le monde a les mêmes cheminées. Dernier en vol gagne.",
   create(room) {
     const n = room.n, W = 800, H = 500, DT = 1 / 30, BX = 200, BR = 13, PW = 64;
     const gates = [];
@@ -1451,11 +1504,13 @@ GAMES.flap = {
 
 // ───────────────────────── DÉMINAGE ─────────────────────────
 GAMES.mines2 = {
+  keys: [[[['Clic']], 'ouvrir une case'], [[['Clic droit']], 'poser / enlever un drapeau 🚩'], [[['Double-clic']], 'sur un chiffre : ouvrir les cases autour']],
+  touch: 'appui long = drapeau',
   icon: '🚩',
   desc: 'Démine la même grille plus vite que les autres',
   title: 'Déminage',
   min: 2,
-  rules: "Tout le monde a la même grille de 32 mines. Clic = ouvrir une case, clic droit (ou appui long) = drapeau, double-clic sur un chiffre = ouvrir autour quand les drapeaux y sont. Le chiffre = nombre de mines autour. Une mine = tu es sonné 4 s. Premier à tout ouvrir gagne, sinon le plus avancé au bout de 2 min 30.",
+  rules: "Tout le monde a la même grille de 32 mines. Le chiffre d'une case = nombre de mines autour d'elle. Une mine = tu es sonné 4 s. Premier à tout ouvrir gagne, sinon le plus avancé au bout de 2 min 30.",
   create(room) {
     const n = room.n, W = 16, H = 12, NM = 32, STUN = 4000;
     const nb = (c) => { const x = c % W, y = Math.floor(c / W), o = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if ((dx || dy) && X >= 0 && Y >= 0 && X < W && Y < H) o.push(Y * W + X); } return o; };

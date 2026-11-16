@@ -25,6 +25,7 @@ const MODES = {
   ffa: { label: 'Chacun pour soi', min: 3, max: 6 },
 };
 const MAX_ROUNDS = 25;
+const MAX_TARGET = 50; // victoire aux points : objectif max
 const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff'];
 const TEAM_PAL = [['#3dd6ff', '#5b8cff', '#2ee5c9'], ['#ff5fa2', '#ff4d6d', '#ff9f1c']];
 const TEAM_NAMES = ['Équipe Bleue', 'Équipe Rose'];
@@ -33,7 +34,7 @@ const GAME_KEYS = Object.keys(GAMES);
 const CATALOG = GAME_KEYS.map((k) => {
   const g = GAMES[k];
   const rules = typeof g.rules === 'function' ? `${g.rules(3)} — En 1v1 : ${g.rules(2)}` : g.rules;
-  return { key: k, title: g.title, icon: g.icon, desc: g.desc, rules };
+  return { key: k, title: g.title, icon: g.icon, desc: g.desc, rules, keys: g.keys, touch: g.touch };
 });
 
 const sendWs = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
@@ -94,6 +95,8 @@ class Room {
     this.hostId = null;
     this.mode = 'duel';
     this.rounds = 5;
+    this.goal = 'rounds'; // 'rounds' = nombre de manches · 'points' = premier à `target` points
+    this.target = 5;
     this.enabled = new Set(GAME_KEYS);
     this.state = 'lobby'; // lobby | intro | round | between
     this.timers = new Set();
@@ -169,7 +172,7 @@ class Room {
     const members = this.members.map((x) => ({ id: x.id, uid: x.uid, name: x.name, team: x.team, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, offline: !!x.offline }));
     this.members.forEach((m) => sendWs(m.ws, {
       t: 'room', code: this.code, you: m.id, key: m.key, host: this.hostId,
-      mode: this.mode, rounds: this.rounds,
+      mode: this.mode, rounds: this.rounds, goal: this.goal, target: this.target,
       modes: Object.entries(MODES).map(([k, v]) => ({ key: k, label: v.label, min: v.min, max: v.max })),
       members,
       games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k) })),
@@ -259,6 +262,8 @@ class Room {
     this.sides.forEach((s, si) => s.forEach((i) => { this.sideOf[i] = si; }));
     this.isFfa = this.mode === 'ffa';
     this.maxRounds = this.rounds;
+    this.byPoints = this.goal === 'points';
+    this.targetPts = this.target;
     this.perRound = this.isFfa ? 3 : 1;
     this.scores = new Array(this.sides.length).fill(0);
     this.queue = [];
@@ -268,7 +273,7 @@ class Room {
     const colors = this.p.map((m, i) => (teams ? TEAM_PAL[m.team][this.sides[m.team].indexOf(i)] : PALETTE[i]));
     const sideNames = teams ? TEAM_NAMES : this.p.map((m) => m.name);
     this.matchInfo = {
-      t: 'matchStart', mode: this.mode, teams, maxRounds: this.maxRounds, sides: this.sides, sideNames,
+      t: 'matchStart', mode: this.mode, teams, maxRounds: this.maxRounds, byPoints: this.byPoints, target: this.targetPts, sides: this.sides, sideNames,
       players: this.p.map((x, j) => ({ name: x.name, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, color: colors[j], side: this.sideOf[j] })),
     };
     this.p.forEach((m, i) => sendWs(m.ws, { ...this.matchInfo, me: i }));
@@ -290,12 +295,12 @@ class Room {
     this.state = 'intro';
     this.roundLog = [];
     this.game = def.create(this);
-    const decisive = this.round > this.maxRounds;
+    const decisive = !this.byPoints && this.round > this.maxRounds;
     // Chacun lit les règles et clique « Prêt » ; départ forcé au bout de 90 s (AFK)
     this.roundReady = new Set();
     this.launching = false;
     this.lastIntro = {
-      t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules,
+      t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules, keys: def.keys, touch: def.touch,
       round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores,
     };
     this.send({ ...this.lastIntro, ready: this.readyList() });
@@ -373,7 +378,8 @@ class Room {
     const sorted = [...this.scores].sort((a, b) => b - a);
     const lead = sorted[0] - sorted[1];
     const remaining = Math.max(0, this.maxRounds - this.round);
-    const over = lead > 0 && (remaining === 0 || lead > this.perRound * remaining);
+    // aux points : fini dès qu'un camp atteint l'objectif seul en tête (égalité au sommet = on continue)
+    const over = lead > 0 && (this.byPoints ? best >= this.targetPts : remaining === 0 || lead > this.perRound * remaining);
     this.later(() => {
       if (!over) return this.nextRound();
       const winners = this.scores.map((s, i) => (s === best ? i : -1)).filter((i) => i >= 0);
@@ -614,6 +620,8 @@ wss.on('connection', (ws) => {
         if (!room.isHost(member.id) || room.state !== 'lobby') return;
         if (m.mode && MODES[m.mode]) room.mode = m.mode;
         if (Number.isInteger(m.rounds)) room.rounds = Math.max(1, Math.min(MAX_ROUNDS, m.rounds));
+        if (m.goal === 'rounds' || m.goal === 'points') room.goal = m.goal;
+        if (Number.isInteger(m.target)) room.target = Math.max(1, Math.min(MAX_TARGET, m.target));
         if (typeof m.game === 'string' && GAMES[m.game]) {
           if (room.enabled.has(m.game)) room.enabled.delete(m.game); else room.enabled.add(m.game);
         }

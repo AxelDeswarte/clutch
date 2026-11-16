@@ -100,7 +100,14 @@ function logo(el) {
 }
 logo($('#logoBig')); logo($('#logoSmall'));
 
-function overlay({ icon, title, color, text, delay, badge }) {
+// bloc « Commandes » : chaque ligne = des groupes de touches équivalentes (séparés par « ou ») + l'action
+function keysHTML(keys, touch) {
+  if (!keys || !keys.length) return '';
+  const cap = (k) => (k === '…' ? '<span class="kor">à</span>' : `<kbd>${esc(k)}</kbd>`);
+  return `<div class="keys">${keys.map(([groups, action]) => `<div class="krow"><span class="kk">${groups.map((g) => g.map(cap).join('')).join('<span class="kor">ou</span>')}</span><span class="ka">${esc(action)}</span></div>`).join('')}
+    ${touch && isTouch ? `<div class="ktouch">📱 Sur téléphone : ${esc(touch)}</div>` : ''}</div>`;
+}
+function overlay({ icon, title, color, text, delay, badge, keys, touch }) {
   clearInterval(countTimer);
   $('#overlay').classList.remove('hidden');
   const card = $('#overlay .ovcard');
@@ -113,6 +120,8 @@ function overlay({ icon, title, color, text, delay, badge }) {
   t.classList.toggle('stroke', !!color);
   t.style.setProperty('--c', color || '');
   $('#ovText').textContent = text || '';
+  $('#ovText').classList.toggle('goal', !!keys);
+  $('#ovKeys').innerHTML = keysHTML(keys, touch);
   $('#ovGag').innerHTML = '';
   $('#ovList').innerHTML = '';
   $('#ovCount').innerHTML = '';
@@ -223,7 +232,7 @@ const Confetti = (() => {
 function renderScore() {
   if (!M) return;
   const sb = $('#scorebar');
-  const rnd = decisive ? '⚡ Manche décisive' : `Manche ${roundNo} / ${M.maxRounds}`;
+  const rnd = decisive ? '⚡ Manche décisive' : M.byPoints ? `Manche ${roundNo} · premier à ${M.target} pt${M.target > 1 ? 's' : ''}` : `Manche ${roundNo} / ${M.maxRounds}`;
   if (M.sides.length === 2) {
     const side = (s, r) => `<div class="sbside ${r ? 'r' : ''}">
       <span class="sbname" style="background:${sideColor(s)}">${M.teams ? esc(sideLabel(s)) : esc(P(M.sides[s][0]).avatar) + ' ' + esc(sideLabel(s)) + (M.sides[s][0] === M.me ? ' (toi)' : '')}</span>
@@ -278,13 +287,20 @@ function renderLobby() {
   }
   $('#count').textContent = `${r.members.length}/6`;
   $('#modes').innerHTML = r.modes.map((m) => { const u = MODE_UI[m.key]; return `<div class="mode ${m.key === r.mode ? 'on' : ''}" data-mode="${m.key}"><span class="i">${u[0]}</span><b>${u[1]}</b><small>${u[2]}</small></div>`; }).join('');
-  const N = r.rounds;
+  const pts = r.goal === 'points';
+  const N = pts ? r.target : r.rounds;
   const twoSides = r.mode !== 'ffa';
-  $('#rounds').innerHTML = `<div class="stepper"><button class="btn white" data-r="${N - 1}">−</button><span class="n">${N}</span><button class="btn white" data-r="${N + 1}">+</button></div>
-    ${[3, 5, 7, 10, 15].map((v) => `<button class="btn sm ${v === N ? 'pink' : 'white'}" data-r="${v}">${v}</button>`).join('')}
-    <div class="roundsinfo">${twoSides
-      ? `Best of ${N} : le premier à <b>${Math.floor(N / 2) + 1}</b> manche${Math.floor(N / 2) + 1 > 1 ? 's' : ''} gagnée${Math.floor(N / 2) + 1 > 1 ? 's' : ''} l'emporte. Égalité = manche décisive.`
-      : `${N} manche${N > 1 ? 's' : ''} · podium 3 / 2 / 1 pts · le plus de points gagne. Égalité = manche décisive.`}</div>`;
+  const pl = (v, w) => `${v} ${w}${v > 1 ? 's' : ''}`;
+  $('#rounds').innerHTML = `<div class="goaltabs"><button class="tab ${pts ? '' : 'on'}" data-goal="rounds">🎯 Nombre de manches</button><button class="tab ${pts ? 'on' : ''}" data-goal="points">🏆 Points à atteindre</button></div>
+    <div class="stepper"><button class="btn white" data-r="${N - 1}">−</button><span class="n">${N}</span><button class="btn white" data-r="${N + 1}">+</button></div>
+    ${(pts ? [3, 5, 10, 15, 20] : [3, 5, 7, 10, 15]).map((v) => `<button class="btn sm ${v === N ? 'pink' : 'white'}" data-r="${v}">${v}</button>`).join('')}
+    <div class="roundsinfo">${pts
+      ? twoSides
+        ? `Le premier camp à <b>${pl(N, 'point')}</b> gagne la partie. 1 manche gagnée = 1 point.`
+        : `Le premier à <b>${pl(N, 'point')}</b> gagne la partie. À chaque manche, le podium marque 3 / 2 / 1 pts. Égalité en tête = on continue.`
+      : twoSides
+        ? `Best of ${N} : le premier à <b>${pl(Math.floor(N / 2) + 1, 'manche')}</b> gagnée${Math.floor(N / 2) + 1 > 1 ? 's' : ''} l'emporte. Égalité = manche décisive.`
+        : `${pl(N, 'manche')} · podium 3 / 2 / 1 pts · le plus de points gagne. Égalité = manche décisive.`}</div>`;
   $('#gamesList').innerHTML = r.games.map((g) => `<button class="gcard ${g.on ? 'on' : ''}" data-game="${g.key}">
     <span class="tick">${g.on ? '✔' : '✖'}</span><span class="i">${g.icon}</span><b>${esc(g.title)}</b><small>${esc(g.desc)}</small></button>`).join('');
   ['#modes', '#rounds', '#gamesList'].forEach((s) => $(s).classList.toggle('nohost', !host));
@@ -321,7 +337,7 @@ function onMsg(m) {
       cur = GAMES[m.game]; active = false; dead = false;
       $('#stage').innerHTML = '';
       cur.init();
-      overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : `Manche ${m.round} / ${m.maxRounds}` });
+      overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : M.byPoints ? `Manche ${m.round} · premier à ${M.target} pts` : `Manche ${m.round} / ${m.maxRounds}`, keys: m.keys, touch: m.touch });
       introOpen = true; readySent = false;
       renderReady(m.ready);
       break;
@@ -1707,6 +1723,7 @@ GAMES.circuit = {
     if (m.k === 'track') {
       this.SEG = m.seg; this.MAX = m.max; this.LEN = m.len;
       this.segs = m.s.map(([c, y, b], i) => ({ c, y1: i ? m.s[i - 1][1] : 0, y2: y, b }));
+      this.obs = m.o || [];
       M.players.forEach((_, i) => legendSet(i, ''));
       // après un refresh, le serveur garde les dernières touches reçues : on repart pédales relâchées
       if (replaying) { this.last = 'reset'; this.sendDrive(); }
@@ -1714,6 +1731,7 @@ GAMES.circuit = {
     }
     if (m.k === 's') pushSnap(this.S, m);
     if (m.k === 'boost' && m.i === M.me) SFX.play('whoosh');
+    if (m.k === 'crash' && m.i === M.me) { this.crashT = performance.now(); SFX.play('bonk'); }
     if (m.k === 'fin') { this.done.add(m.i); legendSet(m.i, `🏁 ${m.tm.toFixed(2)} s`); SFX.play(m.i === M.me ? 'win' : 'ding'); }
   },
   loop() {
@@ -1776,6 +1794,19 @@ GAMES.circuit = {
         vis.set(k, { p1, p2, clip: maxy });
         maxy = p2.y;
       }
+      // cônes, du plus loin au plus proche (masqués derrière les bosses comme les voitures)
+      for (let q = this.obs.length - 1; q >= 0; q--) {
+        const [k, ox] = this.obs[q], v = vis.get(k); if (!v) continue;
+        const s = lerp(v.p1.s, v.p2.s, 0.5), w = s * 300 * W / 2, h = w * 1.15;
+        if (w < 2) continue;
+        const sx = lerp(v.p1.x, v.p2.x, 0.5) + s * ox * RW * W / 2, sy = lerp(v.p1.y, v.p2.y, 0.5);
+        c.save(); c.beginPath(); c.rect(0, 0, W, v.clip); c.clip();
+        c.fillStyle = '#1b1440'; c.fillRect(sx - w * 0.6, sy - h * 0.12, w * 1.2, h * 0.12);
+        c.fillStyle = '#ff7a1a'; c.beginPath(); c.moveTo(sx - w / 2, sy - h * 0.1); c.lineTo(sx, sy - h); c.lineTo(sx + w / 2, sy - h * 0.1); c.closePath(); c.fill();
+        c.fillStyle = '#fff'; c.beginPath(); c.moveTo(sx - w * 0.33, sy - h * 0.4); c.lineTo(sx - w * 0.2, sy - h * 0.65); c.lineTo(sx + w * 0.2, sy - h * 0.65); c.lineTo(sx + w * 0.33, sy - h * 0.4); c.closePath(); c.fill();
+        if (w > 8) { c.strokeStyle = '#1b1440'; c.lineWidth = Math.max(1, w / 30); c.beginPath(); c.moveTo(sx - w / 2, sy - h * 0.1); c.lineTo(sx, sy - h); c.lineTo(sx + w / 2, sy - h * 0.1); c.stroke(); }
+        c.restore();
+      }
       // voitures fantômes, de la plus loin à la plus proche
       range(M.players.length).filter((i) => i !== me).map((i) => [i, pz(i)]).sort((u, v) => v[1] - u[1]).forEach(([i, z]) => {
         const v = vis.get(Math.floor(z / SEG)); if (!v) return;
@@ -1798,6 +1829,7 @@ GAMES.circuit = {
       strokeText(c, `${rank}${rank === 1 ? 'er' : 'e'} / ${M.players.length}`, W - 60, 34, '#ffd23f', 26);
       strokeText(c, `${Math.round((sp / this.MAX) * 280)} km/h`, 80, H - 20, B[me][4] ? '#ff9f1c' : '#fff', 24);
       if (Math.abs(plx) > 1 && !this.done.has(me)) strokeText(c, '🌿 HORS PISTE', W / 2, 90, '#ff4d6d', 22);
+      if (this.crashT && performance.now() - this.crashT < 900) strokeText(c, '💥 AÏE ! Un cône…', W / 2, 140, '#ff9f1c', 32);
       if (this.done.has(me)) strokeText(c, '🏁 ARRIVÉ !', W / 2, 120, '#2ee59d', 40);
       c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(150, 12, W - 300, 8);
       B.forEach((p, i) => { c.fillStyle = P(i).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2; c.beginPath(); c.arc(150 + (W - 300) * Math.min(1, p[0] / this.LEN), 16, i === me ? 8 : 6, 0, 7); c.fill(); c.stroke(); });
@@ -1840,8 +1872,11 @@ GAMES.code = {
   dot(k, extra = '') { return `<span class="cdot ${k == null ? 'empty' : ''}" ${extra} style="${k == null ? '' : `background:${CODE_COLORS[k]}`}"></span>`; },
   render() {
     $('#cslots').innerHTML = range(this.len).map((k) => (this.g[k] != null ? `<button class="cdot" data-k="${k}" style="background:${CODE_COLORS[this.g[k]]}" title="Retirer"></button>` : this.dot(null))).join('');
-    $('#chist').innerHTML = this.hist.slice().reverse().map((h) => `<div class="crow"><b style="width:26px;text-align:right">${h.n}.</b>${h.g.map((k) => this.dot(k)).join('')}
-      <span style="display:inline-grid;grid-template-columns:repeat(2,13px);gap:3px;margin-left:6px">${range(this.len).map((k) => `<span class="peg ${k < h.b ? 'b' : k < h.b + h.w ? 'w' : ''}"></span>`).join('')}</span></div>`).join('');
+    // pions sur une ligne (⚫ d'abord, puis ⚪) + le compte en toutes lettres : ils ne désignent PAS une position
+    const say = (h) => (h.b + h.w === 0 ? 'aucune couleur du code' : [h.b && `${h.b} bien placée${h.b > 1 ? 's' : ''}`, h.w && `${h.w} mal placée${h.w > 1 ? 's' : ''}`].filter(Boolean).join(' · '));
+    $('#chist').innerHTML = (this.hist.length ? '<div class="chead">⚫ bonne couleur à la bonne place · ⚪ bonne couleur à la mauvaise place · l\'ordre des pions ne suit pas les cases</div>' : '')
+      + this.hist.slice().reverse().map((h) => `<div class="crow chrow"><b class="cn">${h.n}.</b>${h.g.map((k) => this.dot(k)).join('')}
+      <span class="pegs">${range(this.len).map((k) => `<span class="peg ${k < h.b ? 'b' : k < h.b + h.w ? 'w' : ''}"></span>`).join('')}</span><span class="csay">${say(h)}</span></div>`).join('');
     $('#cgo').disabled = this.g.length !== this.len || this.locked();
   },
   msg(m) {
@@ -1855,7 +1890,7 @@ GAMES.code = {
     if (m.k === 'fb') {
       this.hist.push(m);
       if (m.b === this.len) { this.solved = true; $('#cst').textContent = `🔓 Code cassé en ${m.n} essai${m.n > 1 ? 's' : ''} !`; SFX.play('win'); }
-      else { $('#cst').textContent = m.n >= this.max ? '🔒 Plus d\'essais… on attend les autres' : `${'⚫'.repeat(m.b)}${'⚪'.repeat(m.w)}${m.b + m.w ? '' : 'Aucune bonne couleur'} — essai ${m.n} / ${this.max}`; SFX.play(m.b + m.w ? 'ok' : 'bad'); }
+      else { $('#cst').textContent = m.n >= this.max ? '🔒 Plus d\'essais… on attend les autres' : `Essai ${m.n} / ${this.max} : ${m.b} bien placée${m.b > 1 ? 's' : ''}, ${m.w} mal placée${m.w > 1 ? 's' : ''}`; SFX.play(m.b + m.w ? 'ok' : 'bad'); }
       this.render();
     }
     if (m.k === 'prog') m.tries.forEach((n, i) => legendSet(i, m.done[i] ? `🔓 ${n}` : `${n}/${this.max}`));
@@ -2089,7 +2124,11 @@ $('#name').addEventListener('keydown', (e) => { if (e.key === 'Enter') ($('#code
 
 const isHost = () => room && room.you === room.host;
 $('#modes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b && isHost()) send({ t: 'cfg', mode: b.dataset.mode }); });
-$('#rounds').addEventListener('click', (e) => { const b = e.target.closest('[data-r]'); if (b && isHost()) send({ t: 'cfg', rounds: +b.dataset.r }); });
+$('#rounds').addEventListener('click', (e) => {
+  if (!isHost()) return;
+  const g = e.target.closest('[data-goal]'); if (g) send({ t: 'cfg', goal: g.dataset.goal });
+  const b = e.target.closest('[data-r]'); if (b) send({ t: 'cfg', [room.goal === 'points' ? 'target' : 'rounds']: +b.dataset.r });
+});
 $('#gamesList').addEventListener('click', (e) => { const b = e.target.closest('[data-game]'); if (b && isHost()) send({ t: 'cfg', game: b.dataset.game }); });
 $('#teams').addEventListener('click', (e) => {
   const b = e.target.closest('[data-team]'); if (b) send({ t: 'team', team: +b.dataset.team });
@@ -2099,7 +2138,7 @@ $('#btnLeave').onclick = leaveToMenu;
 $('#btnMenu').onclick = backToMenu;
 let CATALOG = [];
 $('#btnGames').onclick = () => {
-  $('#gmBody').innerHTML = CATALOG.map((g) => `<div class="gmrow"><span class="i">${g.icon}</span><div><b>${esc(g.title)}</b><small>${esc(g.desc)}</small><p>${esc(g.rules)}</p></div></div>`).join('') || '<p class="mut">Connexion au serveur…</p>';
+  $('#gmBody').innerHTML = CATALOG.map((g) => `<div class="gmrow"><span class="i">${g.icon}</span><div><b>${esc(g.title)}</b><small>${esc(g.desc)}</small><p>${esc(g.rules)}</p>${keysHTML(g.keys, g.touch)}</div></div>`).join('') || '<p class="mut">Connexion au serveur…</p>';
   $('#gamesModal').classList.remove('hidden');
 };
 $('#gamesModal').addEventListener('click', (e) => { if (e.target.id === 'gamesModal' || e.target.closest('#gmClose')) $('#gamesModal').classList.add('hidden'); });
