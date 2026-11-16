@@ -49,6 +49,22 @@ class Race {
 
 const GAMES = {};
 
+// Grilles (Tron, Serpents) au-delà de 6 joueurs : départs répartis sur les 4 bords, tournés vers l'intérieur.
+// Le joueur i part du bord i % 4 ; les gauche / droite sont décalés pour ne pas se foncer dessus,
+// et on reste entre 20 % et 80 % du bord pour que les coins restent libres (sinon un départ croise un corps).
+function edgeSpawns(n, W, H, m) {
+  const per = [0, 0, 0, 0];
+  for (let i = 0; i < n; i++) per[i % 4]++;
+  const at = (s, k) => {
+    const c = per[s], f = 0.2 + (0.6 * (k + (s === 1 || s === 3 ? 0.75 : 0.25))) / c;
+    if (s === 0) return [m, Math.round(f * (H - 1)), 'right'];
+    if (s === 1) return [W - 1 - m, Math.round(f * (H - 1)), 'left'];
+    if (s === 2) return [Math.round(f * (W - 1)), m, 'down'];
+    return [Math.round(f * (W - 1)), H - 1 - m, 'up'];
+  };
+  return range(n).map((i) => at(i % 4, Math.floor(i / 4)));
+}
+
 // ───────────────────────── RÉFLEXE ─────────────────────────
 GAMES.reflex = {
   keys: [[[['Espace'], ['Clic']], 'dégainer au cri « FEU ! » (pas avant !)']],
@@ -159,6 +175,7 @@ GAMES.seq = {
 
 // ───────────────────────── TRON ─────────────────────────
 GAMES.tron = {
+  team: { rule: "En équipe : coincez les adversaires ensemble. La dernière équipe avec un trait en vie gagne." },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'tourner (on ne peut pas faire demi-tour)']],
   touch: 'flèches sous le jeu',
   icon: '🏍️',
@@ -174,7 +191,8 @@ GAMES.tron = {
     const q4 = Math.floor(H / 4), q34 = Math.floor((3 * H) / 4), mid = H >> 1, cx = W >> 1;
     const spawns = n === 2
       ? [[6, mid, 'right'], [W - 7, mid, 'left']]
-      : [[6, q4, 'right'], [W - 7, q34, 'left'], [cx, 3, 'down'], [cx - 1, H - 4, 'up'], [6, q34, 'right'], [W - 7, q4, 'left']];
+      : n > 6 ? edgeSpawns(n, W, H, 4)
+        : [[6, q4, 'right'], [W - 7, q34, 'left'], [cx, 3, 'down'], [cx - 1, H - 4, 'up'], [6, q34, 'right'], [W - 7, q4, 'left']];
     const grid = new Uint8Array(W * H);
     const p = range(n).map((i) => ({ x: spawns[i][0], y: spawns[i][1], d: spawns[i][2], q: [], alive: true }));
     const deathTick = new Array(n).fill(Infinity);
@@ -297,6 +315,7 @@ GAMES.memory = {
 
 // ───────────────────────── ESQUIVE ─────────────────────────
 GAMES.dodge = {
+  team: { rule: "En équipe : tu ne peux bousculer que les adversaires. Dernière équipe entière gagne." },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer le joueur le plus proche']],
   touch: 'flèches + bouton 💥 sous le jeu',
   icon: '🪚',
@@ -375,6 +394,7 @@ GAMES.dodge = {
 
 // ───────────────────────── COURSE DE HAIES ─────────────────────────
 GAMES.race = {
+  team: { rule: "En équipe : les places s'additionnent (1er = le plus de points). Un coéquipier dernier fait perdre l'équipe !", sum: true },
   keys: [[[['⬅', '➡'], ['Q', 'D']], 'alterner vite pour courir'], [[['⬆'], ['Z'], ['Espace']], 'sauter une haie']],
   touch: 'boutons ⬅ ⬆ ➡ sous le jeu',
   icon: '🏃',
@@ -445,7 +465,7 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [], SHOVE = 3
       }
       if (m.a === 'shove' && p.cd <= 0) {
         let best = -1, bd = PR * 2 + 26;
-        pl.forEach((q, j) => { if (j !== i && q.alive) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = j; } } });
+        pl.forEach((q, j) => { if (j !== i && q.alive && room.sideOf[j] !== room.sideOf[i]) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = j; } } });
         p.cd = 1.3;
         if (best >= 0) {
           const q = pl[best];
@@ -505,12 +525,12 @@ GAMES.filter = {
   keys: [[[['⬅'], ['Q']], '🔥 four : la ferraille 🔩 ⚙️ 🔧'], [[['➡'], ['D']], '📦 caisse : les tableaux 🖼️']],
   touch: 'gros boutons au-dessus du tapis',
   icon: '🔥',
-  desc: 'Trie le plus vite possible en 40 s',
+  desc: 'Trie le plus vite possible en 30 s',
   title: 'Le Filtre',
   min: 2,
-  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les tableaux en caisse. Une erreur = tu es sonné 1,5 s. 40 secondes : celui qui en a trié le plus gagne.",
+  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les tableaux en caisse. Une erreur = tu es sonné 1,5 s. 30 secondes : celui qui en a trié le plus gagne.",
   create(room) {
-    const n = room.n, N = 400, STUN = 1500, DUR = 40000;
+    const n = room.n, N = 400, STUN = 1500, DUR = 30000;
     const items = Array.from({ length: N }, () => {
       const frame = Math.random() < 0.5;
       const [e, name] = pick(frame ? FRAMES : PARTS);
@@ -550,6 +570,7 @@ GAMES.filter = {
 // ───────────────────────── SOL INSTABLE ─────────────────────────
 const FLOOR_SYM = ['💀', '🔪', '🩸', '👁️'];
 GAMES.floor = {
+  team: { rule: "En équipe : tu ne peux bousculer que les adversaires. Dernière équipe debout gagne." },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer le joueur le plus proche']],
   touch: 'flèches + bouton 💥 sous le jeu',
   icon: '🕳️',
@@ -711,6 +732,7 @@ GAMES.manners = {
 
 // ───────────────────────── L'ARAIGNÉE ─────────────────────────
 GAMES.bomb = {
+  team: { rule: "En équipe : impossible de refiler l'araignée à un coéquipier, seulement aux adversaires." },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer']],
   touch: 'flèches sous le jeu',
   icon: '🕷️',
@@ -725,7 +747,7 @@ GAMES.bomb = {
     const deathT = new Array(n).fill(Infinity);
     let holder = -1, prev = -1, fuse = 0, grab = 0, t = 0, pause = 2.2, first = true;
     const aliveIdx = () => range(n).filter((i) => A.pl[i].alive);
-    function arm() { const a = aliveIdx(); holder = pick(a); prev = -1; fuse = first ? 17 + Math.random() * 5 : 8 + Math.random() * 6; first = false; grab = 1; room.send({ t: 'g', k: 'arm', i: holder }); }
+    function arm() { const a = aliveIdx(); const fresh = first && a.length > 1 ? a.filter((i) => i !== room.bombFirst) : a; holder = pick(fresh); if (first) room.bombFirst = holder; prev = -1; fuse = first ? 17 + Math.random() * 5 : 8 + Math.random() * 6; first = false; grab = 1; room.send({ t: 'g', k: 'arm', i: holder }); }
     function step() {
       t += DT;
       A.move(DT, (i) => (i === holder ? 255 : 225));
@@ -734,7 +756,7 @@ GAMES.bomb = {
         fuse -= DT; grab -= DT;
         const h = A.pl[holder];
         if (grab <= 0) {
-          const j = A.pl.findIndex((q, k) => k !== holder && k !== prev && q.alive && Math.hypot(q.x - h.x, q.y - h.y) < A.PR * 2 + 4);
+          const j = A.pl.findIndex((q, k) => k !== holder && k !== prev && q.alive && room.sideOf[k] !== room.sideOf[holder] && Math.hypot(q.x - h.x, q.y - h.y) < A.PR * 2 + 4);
           if (j >= 0) { prev = holder; holder = j; grab = 0.6; room.send({ t: 'g', k: 'pass', i: j }); }
         }
         if (prev >= 0 && grab < -0.4) prev = -1;
@@ -758,6 +780,7 @@ GAMES.bomb = {
 
 // ───────────────────────── CHAMP DE MINES ─────────────────────────
 GAMES.mines = {
+  team: { rule: "En équipe : tu ne peux bousculer que les adversaires. Les places de chaque équipe s'additionnent.", sum: true },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'se déplacer'], [[['Espace']], 'bousculer un joueur (sur une mine, c\'est cadeau)'], [[['Immobile 1 s']], 'sonar : révèle les mines proches']],
   touch: 'flèches + bouton 💥 sous le jeu',
   icon: '💥',
@@ -838,7 +861,7 @@ GAMES.undercover = {
     const n = room.n;
     if (n === 2) return undercoverDuel(room);
     const pair = shuffle([...pick(UC_PAIRS)]);
-    const nu = n >= 6 ? 2 : 1;
+    const nu = n >= 9 ? 3 : n >= 6 ? 2 : 1;
     const uc = new Set(shuffle(range(n)).slice(0, nu));
     const word = (i) => (uc.has(i) ? pair[1] : pair[0]);
     const alive = new Array(n).fill(true);
@@ -888,7 +911,7 @@ GAMES.undercover = {
       const out = pick(cands);
       alive[out] = false;
       const role = uc.has(out) ? 'undercover' : 'civil';
-      room.send({ t: 'g', k: 'out', i: out, role, word: word(out), tally, tie: cands.length > 1 });
+      room.send({ t: 'g', k: 'out', i: out, role, tally, tie: cands.length > 1 }); // le mot n'est révélé qu'à la fin
       room.eliminate(out, { role });
       const ucAlive = aliveIdx().filter((i) => uc.has(i)).length;
       const civAlive = aliveIdx().length - ucAlive;
@@ -944,6 +967,9 @@ function lev(a, b) {
 // Anti-triche : un seul mot, et rien qui ressemble à son propre mot (morceau, même racine, faute de frappe…)
 function clueProblem(text, word) {
   if (/\s/.test(text.trim())) return 'Un seul mot ! (pas d\'espace)';
+  // lettres seulement (accents, tiret et apostrophe tolérés) : pas de « mot_mot_mot » pour tricher
+  if (!/^[\p{L}][\p{L}'’-]*$/u.test(text.trim())) return 'Des lettres seulement !';
+  if (text.trim().length > 16) return 'Mot trop long (16 lettres max).';
   const a = norm(text);
   if (a.length < 2) return 'Indice trop court.';
   const parts = [norm(word), ...word.split(/[\s'’-]+/).map(norm)].filter((w) => w.length >= 3);
@@ -1011,6 +1037,7 @@ function undercoverDuel(room) {
 
 // ───────────────────────── TANK ─────────────────────────
 GAMES.tank = {
+  team: { rule: "En équipe : pas de tir ami. La dernière équipe avec un tank debout gagne." },
   keys: [[[['Z', 'Q', 'S', 'D']], 'rouler'], [[['⬆', '⬇', '⬅', '➡']], 'orienter le canon'], [[['Espace']], 'tirer (maintenir = rafale)']],
   touch: 'le pad roule ET vise, bouton 💥 pour tirer',
   icon: '🪖',
@@ -1152,14 +1179,14 @@ GAMES.words = {
   desc: 'Un mot avec ces lettres, vite !',
   title: 'Syllabes',
   min: 2,
-  rules: "Chacun son tour, une syllabe s'affiche (ex. « TRA »). Trouve un mot français qui la contient (« ex-TRA-ordinaire ») avant que la mèche brûle. Accents facultatifs, pas deux fois le même mot. Trop lent = une vie en moins (2 vies). Dernier en vie gagne.",
+  rules: "Chacun son tour, une syllabe s'affiche (ex. « TRA »). Trouve un mot français qui la contient (« ex-TRA-ordinaire ») avant que la mèche brûle. La mèche raccourcit à chaque mot trouvé (10 s → 3 s) et repart à 10 s quand quelqu'un explose. Accents facultatifs, pas deux fois le même mot. 2 vies. Dernier en vie gagne.",
   create(room) {
     const n = room.n, LIVES = 2;
     const D = dict();
     const lives = new Array(n).fill(LIVES);
     const used = new Set();
     const deathT = new Array(n).fill(0);
-    let cur = -1, syl = '', turns = 0, phase = 'idle', timer = null, t0 = Date.now();
+    let cur = -1, syl = '', turns = 0, streak = 0, phase = 'idle', timer = null, t0 = Date.now();
     const alive = () => range(n).filter((i) => lives[i] > 0);
     const scores = () => range(n).map((i) => (lives[i] > 0 ? 1e9 + lives[i] : deathT[i]));
 
@@ -1180,7 +1207,7 @@ GAMES.words = {
       cur = nextPlayer();
       newSyl();
       turns++;
-      const ms = Math.round(Math.max(6000, 12000 - turns * 150));
+      const ms = Math.round(Math.max(3000, 10000 - streak * 700));
       phase = 'turn';
       room.send({ t: 'g', k: 'turn', i: cur, syl, ms, lives });
       timer = room.later(() => boom(cur), ms);
@@ -1189,6 +1216,7 @@ GAMES.words = {
       if (phase !== 'turn' || cur !== i) return;
       phase = 'gap';
       lives[i]--;
+      streak = 0; // explosion : la mèche repart à 10 s
       if (lives[i] <= 0) { deathT[i] = Date.now() - t0; room.eliminate(i); }
       room.send({ t: 'g', k: 'boom', i, lives, syl });
       room.later(turn, 1600);
@@ -1212,6 +1240,7 @@ GAMES.words = {
         if (bad) return room.send({ t: 'g', k: 'nope', i, text, msg: bad });
         room.cancel(timer);
         used.add(w);
+        streak++;
         phase = 'gap';
         room.send({ t: 'g', k: 'ok', i, text });
         room.later(turn, 500);
@@ -1261,6 +1290,7 @@ function buildTrack() {
 }
 
 GAMES.circuit = {
+  team: { rule: "En équipe : les places s'additionnent (1er = le plus de points). Un coéquipier dernier fait perdre l'équipe !", sum: true },
   keys: [[[['⬆'], ['Z']], 'accélérer'], [[['⬇'], ['S']], 'freiner'], [[['⬅', '➡'], ['Q', 'D']], 'tourner']],
   touch: 'boutons ⬅ ➡ 🛑 GAZ sous la route',
   icon: '🏎️',
@@ -1273,10 +1303,12 @@ GAMES.circuit = {
     const { segs: track, obs } = buildTrack(), LEN = track.length * RSEG - RSEG * 30;
     const pl = range(n).map((i) => ({ z: 0, x: n === 1 ? 0 : -0.6 + (1.2 * i) / Math.max(1, n - 1), sp: 0, th: 0, br: 0, st: 0, boost: 0 }));
     const race = new Race(room);
+    const GO = 3; // feux de départ : 3, 2, 1, GO
     let t = 0;
     const end = () => room.finish(race.scores(pl.map((p) => p.z / LEN)), race.order.map((i, k) => `${k + 1}. ${room.name(i)} ${pl[i].time.toFixed(2)} s`).join(' · ') || 'Personne n\'a franchi la ligne.');
     function step() {
       t += DT;
+      if (t < GO) return room.send({ t: 'g', k: 's', go: +(GO - t).toFixed(2), tm: 0, p: pl.map((p) => [0, Math.round(p.x * 100), 0, 0, 0]) });
       pl.forEach((p, i) => {
         if (race.done[i]) { p.sp = Math.max(0, p.sp - RMAX * DT); p.z += p.sp * DT; return; }
         const seg = track[Math.floor(p.z / RSEG) % track.length];
@@ -1307,9 +1339,9 @@ GAMES.circuit = {
             room.send({ t: 'g', k: 'crash', i });
           }
         }
-        if (p.z >= LEN) { p.time = t; room.send({ t: 'g', k: 'fin', i, tm: +t.toFixed(2) }); race.finish(i, end); }
+        if (p.z >= LEN) { p.time = t - GO; room.send({ t: 'g', k: 'fin', i, tm: +p.time.toFixed(2) }); race.finish(i, end); }
       });
-      room.send({ t: 'g', k: 's', tm: +t.toFixed(2), p: pl.map((p, i) => [Math.round(p.z), Math.round(p.x * 100), Math.round(p.sp), race.done[i] ? 1 : 0, p.boost > 0 ? 1 : 0]) });
+      room.send({ t: 'g', k: 's', tm: +(t - GO).toFixed(2), p: pl.map((p, i) => [Math.round(p.z), Math.round(p.x * 100), Math.round(p.sp), race.done[i] ? 1 : 0, p.boost > 0 ? 1 : 0]) });
     }
     return {
       start() {
@@ -1329,35 +1361,44 @@ GAMES.circuit = {
 
 // ───────────────────────── CODE SECRET (logique) ─────────────────────────
 GAMES.code = {
+  team: { rule: "En équipe : vous cherchez le même code avec les mêmes essais partagés. Discutez avant de proposer !" },
   keys: [[[['Clic'], ['1', '…', '6']], 'ajouter une couleur'], [[['⌫']], 'effacer la dernière'], [[['Entrée']], 'proposer la combinaison']],
   icon: '🔐',
   desc: 'Casse le code couleur en premier',
   title: 'Code secret',
   min: 2,
-  rules: "Un code secret de 4 couleurs (parmi 6, une couleur peut revenir), le même pour tout le monde. Après chaque essai : ⚫ = une couleur bien placée, ⚪ = une couleur présente mais mal placée. Les pions ne disent PAS lesquelles ! 10 essais. Le premier qui casse le code gagne, sinon le plus proche.",
+  rules: "Un code secret de 4 couleurs (parmi 6, une couleur peut revenir), le même pour tout le monde. Après chaque essai, chaque boule reçoit une marque : ⚫ = bonne couleur à la bonne place, ⚪ = cette couleur est dans le code mais ailleurs, rien = pas (ou plus) dans le code. 8 essais. Le premier qui casse le code gagne, sinon le plus proche.",
   create(room) {
-    const n = room.n, LEN = 4, COLS = 6, MAXT = 10;
+    const n = room.n, LEN = 4, COLS = 6, MAXT = 8;
     const code = range(LEN).map(() => ri(0, COLS - 1));
-    const tries = new Array(n).fill(0), best = new Array(n).fill(0);
+    // tout est compté par camp : en chacun pour soi un camp = un joueur, en équipe les essais sont partagés
+    const S = room.sides.length, side = (i) => room.sideOf[i];
+    const tries = new Array(S).fill(0), best = new Array(S).fill(0), solved = new Array(S).fill(false);
     const race = new Race(room);
     // classement des non-résolus : meilleure réponse (⚫ vaut plus que ⚪), puis moins d'essais
-    const end = () => room.finish(race.scores(best.map((b, i) => b - tries[i] / 100)), `Le code était : ${code.map((c) => ['rouge', 'jaune', 'vert', 'bleu', 'violet', 'orange'][c]).join(' · ')}`);
-    const prog = () => room.send({ t: 'g', k: 'prog', tries, done: race.done });
+    const end = () => room.finish(race.scores(range(n).map((i) => best[side(i)] - tries[side(i)] / 100)), `Le code était : ${code.map((c) => ['rouge', 'jaune', 'vert', 'bleu', 'violet', 'orange'][c]).join(' · ')}`);
+    const prog = () => room.send({ t: 'g', k: 'prog', tries: range(n).map((i) => tries[side(i)]), done: range(n).map((i) => solved[side(i)]) });
+    // marque de chaque boule : 'b' bien placée, 'w' présente ailleurs (dans la limite du nombre restant), '' sinon
+    function marks(g) {
+      const out = g.map((v, k) => (v === code[k] ? 'b' : ''));
+      const left = new Array(COLS).fill(0);
+      code.forEach((c, k) => { if (out[k] !== 'b') left[c]++; });
+      g.forEach((v, k) => { if (out[k] !== 'b' && left[v] > 0) { out[k] = 'w'; left[v]--; } });
+      return out;
+    }
     return {
       start() { room.send({ t: 'g', k: 'code', len: LEN, cols: COLS, max: MAXT, ms: 150000 }); room.later(end, 150000); },
       input(i, m) {
-        if (m.a !== 'guess' || race.done[i] || tries[i] >= MAXT || !Array.isArray(m.g) || m.g.length !== LEN) return;
+        const sd = side(i);
+        if (m.a !== 'guess' || solved[sd] || tries[sd] >= MAXT || !Array.isArray(m.g) || m.g.length !== LEN) return;
         const g = m.g.map((v) => v | 0);
         if (g.some((v) => v < 0 || v >= COLS)) return;
-        tries[i]++;
-        let b = 0, w = 0;
-        const rc = new Array(COLS).fill(0), rg = new Array(COLS).fill(0);
-        g.forEach((v, k) => { if (v === code[k]) b++; else { rc[code[k]]++; rg[v]++; } });
-        for (let c = 0; c < COLS; c++) w += Math.min(rc[c], rg[c]);
-        best[i] = Math.max(best[i], b * 10 + w);
-        room.send({ t: 'g', k: 'fb', g, b, w, n: tries[i] }, i);
-        if (b === LEN) race.finish(i, end);
-        else if (range(n).every((j) => race.done[j] || tries[j] >= MAXT)) room.later(end, 300);
+        tries[sd]++;
+        const mk = marks(g), b = mk.filter((x) => x === 'b').length, w = mk.filter((x) => x === 'w').length;
+        best[sd] = Math.max(best[sd], b * 10 + w);
+        room.sides[sd].forEach((j) => room.send({ t: 'g', k: 'fb', g, mk, b, w, n: tries[sd], who: i }, j));
+        if (b === LEN) { solved[sd] = true; room.sides[sd].forEach((j) => race.finish(j, end)); }
+        else if (range(S).every((x) => solved[x] || tries[x] >= MAXT)) room.later(end, 300);
         prog();
       },
     };
@@ -1366,6 +1407,7 @@ GAMES.code = {
 
 // ───────────────────────── SERPENTS ─────────────────────────
 GAMES.snake = {
+  team: { rule: "En équipe : la dernière équipe avec un serpent en vie gagne. Les serpents d'une même équipe se tuent aussi entre eux, attention !" },
   keys: [[[['⬆', '⬇', '⬅', '➡'], ['Z', 'Q', 'S', 'D']], 'tourner']],
   touch: 'flèches sous le jeu',
   icon: '🐍',
@@ -1375,13 +1417,14 @@ GAMES.snake = {
   rules: "Mange les fruits pour grandir. Toucher un mur, ton corps ou un autre serpent = mort (deux têtes qui se cognent : les deux meurent). Un serpent mort se transforme en fruits. Dernier en vie gagne, sinon le plus long au bout de 90 s.",
   create(room) {
     const n = room.n;
-    const W = n <= 2 ? 32 : 40, H = n <= 2 ? 22 : 28, TICK = 115;
+    const W = n <= 2 ? 32 : n <= 6 ? 40 : 48, H = n <= 2 ? 22 : n <= 6 ? 28 : 32, TICK = 115;
     const D = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
     const q4 = Math.floor(H / 4), q34 = Math.floor((3 * H) / 4), mid = H >> 1, cx = W >> 1;
     const spawns = n === 2
       ? [[5, mid, 'right'], [W - 6, mid, 'left']]
-      : [[5, q4, 'right'], [W - 6, q34, 'left'], [cx, 4, 'down'], [cx - 1, H - 5, 'up'], [5, q34, 'right'], [W - 6, q4, 'left']];
+      : n > 6 ? edgeSpawns(n, W, H, 4)
+        : [[5, q4, 'right'], [W - 6, q34, 'left'], [cx, 4, 'down'], [cx - 1, H - 5, 'up'], [5, q34, 'right'], [W - 6, q4, 'left']];
     const sn = range(n).map((i) => {
       const [x, y, d] = spawns[i], [dx, dy] = D[d];
       return { body: range(4).map((k) => (y - dy * k) * W + (x - dx * k)), d, q: [], alive: true, grow: 0 };
@@ -1466,15 +1509,16 @@ GAMES.flap = {
     }
     const pl = range(n).map(() => ({ y: H / 2, vy: 0, alive: true }));
     const deathT = new Array(n).fill(0);
+    const GO = 3; // 3, 2, 1, GO : rien ne bouge avant
     let d = 0, t = 0;
     function step() {
       t += DT;
-      const speed = 200 + t * 5;
+      if (t < GO) return room.send({ t: 'g', k: 's', go: +(GO - t).toFixed(2), d: 0, p: pl.map((p) => [Math.round(p.y), 1, 0]) });
+      const speed = 200 + (t - GO) * 5;
       d += speed * DT;
       const died = [];
       pl.forEach((p, i) => {
         if (!p.alive) return;
-        if (t < 1.2) return; // petit vol stationnaire au départ
         p.vy = Math.min(700, p.vy + 1500 * DT);
         p.y += p.vy * DT;
         if (p.y < BR) { p.y = BR; p.vy = 0; }
@@ -1497,7 +1541,7 @@ GAMES.flap = {
         room.every(step, 1000 / 30);
         room.later(() => room.finish(range(n).map((i) => (pl[i].alive ? 1e9 : deathT[i])), 'Temps écoulé.'), 120000);
       },
-      input(i, m) { const p = pl[i]; if (m.a === 'flap' && p.alive) p.vy = -440; },
+      input(i, m) { const p = pl[i]; if (m.a === 'flap' && p.alive && t >= GO) p.vy = -440; },
     };
   },
 };

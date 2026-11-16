@@ -262,7 +262,7 @@ function renderFriends() {
       const here = inRoom && f.code === room.code;
       let btn = '';
       if (f.status === 'lobby' && f.joinable && !here) btn = `<button class="btn sm green" data-fa="join" data-code="${esc(f.code)}">Rejoindre</button>`;
-      else if (inRoom && !here && f.status !== 'offline' && room.members.length < 6) btn = `<button class="btn sm pink" data-fa="invite" data-id="${f.id}">Inviter</button>`;
+      else if (inRoom && !here && f.status !== 'offline' && room.members.length < 10) btn = `<button class="btn sm pink" data-fa="invite" data-id="${f.id}">Inviter</button>`;
       return `<div class="frow ${f.status === 'offline' ? 'off' : ''}">${pillRaw(f, '#3dd6ff')}
         <span class="fst">${ic} ${here ? 'Dans ton salon' : label}</span><span class="grow"></span>${btn}
         <button class="btn sm white fdel" data-fa="remove" data-id="${f.id}" title="Retirer">✖</button></div>`;
@@ -291,3 +291,18 @@ $('#friendsLobby').addEventListener('click', friendsClick);
   if (e.key === 'Enter' && e.target.classList.contains('fadd')) e.currentTarget.querySelector('[data-fa="add"]').click();
 }));
 $('#btnCustomLobby').onclick = openCustom;
+
+// ════════════════ œil : afficher le mot de passe en le tapant ════════════════
+document.querySelectorAll('input[type="password"]').forEach((inp) => {
+  const w = document.createElement('span'); w.className = 'pwwrap';
+  inp.parentNode.insertBefore(w, inp); w.appendChild(inp);
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'pweye'; b.textContent = '👁️'; b.title = 'Afficher le mot de passe';
+  b.onclick = () => {
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    b.textContent = show ? '🙈' : '👁️'; b.title = show ? 'Cacher le mot de passe' : 'Afficher le mot de passe';
+    inp.focus();
+  };
+  w.appendChild(b);
+});

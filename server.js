@@ -15,26 +15,28 @@ const HOST = process.env.HOST || '0.0.0.0';
 // adresse publique du site pour les liens envoyés par email (jamais l'en-tête Host, falsifiable)
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const PUBLIC = path.join(__dirname, 'public');
-const MAX_MEMBERS = 6;
+const MAX_MEMBERS = 10;
 const GRACE_MS = 45000; // temps laissé pour revenir après un refresh / une coupure
 
+// Chacun pour soi = le mode principal (tous les jeux). Les équipes n'ont que les jeux qui ont du sens à plusieurs.
 const MODES = {
-  duel: { label: '1v1', min: 2, max: 2 },
+  ffa: { label: 'Chacun pour soi', min: 2, max: MAX_MEMBERS },
   '2v2': { label: '2v2', min: 4, max: 4, teamSize: 2 },
   '3v3': { label: '3v3', min: 6, max: 6, teamSize: 3 },
-  ffa: { label: 'Chacun pour soi', min: 3, max: 6 },
 };
+const TEAM_GAMES = Object.keys(GAMES).filter((k) => GAMES[k].team);
+const OFF_BY_DEFAULT = ['mines2', 'undercover'];
 const MAX_ROUNDS = 25;
 const MAX_TARGET = 50; // victoire aux points : objectif max
-const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff'];
+const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff', '#ff4d6d', '#5b8cff', '#c6f432', '#ff8fd8'];
 const TEAM_PAL = [['#3dd6ff', '#5b8cff', '#2ee5c9'], ['#ff5fa2', '#ff4d6d', '#ff9f1c']];
 const TEAM_NAMES = ['Équipe Bleue', 'Équipe Rose'];
 const GAME_KEYS = Object.keys(GAMES);
 // règles de tous les jeux pour la page « Les mini-jeux » du menu
 const CATALOG = GAME_KEYS.map((k) => {
   const g = GAMES[k];
-  const rules = typeof g.rules === 'function' ? `${g.rules(3)} — En 1v1 : ${g.rules(2)}` : g.rules;
-  return { key: k, title: g.title, icon: g.icon, desc: g.desc, rules, keys: g.keys, touch: g.touch };
+  const rules = typeof g.rules === 'function' ? `${g.rules(3)} — À 2 joueurs : ${g.rules(2)}` : g.rules;
+  return { key: k, title: g.title, icon: g.icon, desc: g.desc, rules, keys: g.keys, touch: g.touch, team: g.team || null };
 });
 
 const sendWs = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
@@ -93,15 +95,16 @@ class Room {
     this.code = code;
     this.members = [];
     this.hostId = null;
-    this.mode = 'duel';
+    this.mode = 'ffa';
     this.rounds = 5;
     this.goal = 'rounds'; // 'rounds' = nombre de manches · 'points' = premier à `target` points
     this.target = 5;
-    this.enabled = new Set(GAME_KEYS);
+    this.enabled = new Set(GAME_KEYS.filter((k) => !OFF_BY_DEFAULT.includes(k)));
     this.state = 'lobby'; // lobby | intro | round | between
     this.timers = new Set();
     this.lastResult = '';
     this.roundLog = [];
+    this.chatLog = []; // derniers messages du chat, renvoyés à qui arrive ou revient après un refresh
   }
 
   // ---------- API utilisée par les mini-jeux ----------
@@ -162,9 +165,14 @@ class Room {
       return { ok: false, hint: `Équipes déséquilibrées : il faut ${m.teamSize} joueurs par équipe.` };
     }
     if (this.members.some((x) => x.offline)) return { ok: false, hint: "Un joueur s'est déconnecté, on l'attend…" };
-    const playable = [...this.enabled].filter((k) => GAMES[k].min <= c);
-    if (!playable.length) return { ok: false, hint: 'Aucun mini-jeu activé jouable avec ce nombre de joueurs.' };
+    const playable = this.playable(c);
+    if (!playable.length) return { ok: false, hint: m.teamSize ? 'Aucun jeu d\'équipe activé (ceux marqués 👥).' : 'Aucun mini-jeu activé jouable avec ce nombre de joueurs.' };
     return { ok: true, hint: '' };
+  }
+
+  playable(c) {
+    const teams = !!MODES[this.mode].teamSize;
+    return [...this.enabled].filter((k) => GAMES[k].min <= c && (!teams || GAMES[k].team));
   }
 
   broadcastRoom() {
@@ -175,7 +183,7 @@ class Room {
       mode: this.mode, rounds: this.rounds, goal: this.goal, target: this.target,
       modes: Object.entries(MODES).map(([k, v]) => ({ key: k, label: v.label, min: v.min, max: v.max })),
       members,
-      games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k) })),
+      games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k), team: !!GAMES[k].team })),
       canStart: chk.ok, hint: chk.hint, inMatch: this.state !== 'lobby', lastResult: this.lastResult,
     }));
   }
@@ -195,6 +203,7 @@ class Room {
     this.members.push(member);
     if (!this.hostId) this.hostId = member.id;
     this.broadcastRoom();
+    sendWs(S.ws, { t: 'chatHist', list: this.chatLog });
     presenceChanged(member.uid);
     return member;
   }
@@ -228,6 +237,7 @@ class Room {
     member.ws = ws;
     member.offline = false;
     this.broadcastRoom();
+    sendWs(ws, { t: 'chatHist', list: this.chatLog });
     presenceChanged(member.uid);
     if (this.p && this.p.includes(member) && this.state !== 'lobby') {
       const i = this.p.indexOf(member);
@@ -261,10 +271,11 @@ class Room {
     this.sideOf = [];
     this.sides.forEach((s, si) => s.forEach((i) => { this.sideOf[i] = si; }));
     this.isFfa = this.mode === 'ffa';
+    this.isTeams = teams;
     this.maxRounds = this.rounds;
     this.byPoints = this.goal === 'points';
     this.targetPts = this.target;
-    this.perRound = this.isFfa ? 3 : 1;
+    this.perRound = 1;
     this.scores = new Array(this.sides.length).fill(0);
     this.queue = [];
     this.round = 0;
@@ -283,7 +294,7 @@ class Room {
   }
 
   nextRound() {
-    const playable = [...this.enabled].filter((k) => GAMES[k].min <= this.n);
+    const playable = this.playable(this.n);
     if (this.queue.length === 0) {
       this.queue = shuffle([...playable]);
       if (this.queue.length > 1 && this.queue[0] === this.gameKey) this.queue.push(this.queue.shift());
@@ -295,12 +306,14 @@ class Room {
     this.state = 'intro';
     this.roundLog = [];
     this.game = def.create(this);
+    this.lastGame = def;
     const decisive = !this.byPoints && this.round > this.maxRounds;
     // Chacun lit les règles et clique « Prêt » ; départ forcé au bout de 90 s (AFK)
     this.roundReady = new Set();
     this.launching = false;
     this.lastIntro = {
       t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules, keys: def.keys, touch: def.touch,
+      teamRule: this.isTeams && def.team ? def.team.rule : null,
       round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores,
     };
     this.send({ ...this.lastIntro, ready: this.readyList() });
@@ -352,13 +365,15 @@ class Room {
     let winSide = -1;
 
     if (this.isFfa) {
-      ranks.forEach((r, i) => { if (r < worst || worst === 1) gained[this.sideOf[i]] += r === 1 ? 3 : r === 2 ? 2 : r === 3 ? 1 : 0; });
-      if (worst === 1) gained.fill(0);
+      // 1 point au(x) premier(s), 0 aux autres ; tout le monde ex æquo = personne ne marque
       const firsts = ranks.map((r, i) => (r === 1 ? i : -1)).filter((i) => i >= 0);
-      winSide = firsts.length === 1 ? this.sideOf[firsts[0]] : -1;
+      if (worst > 1) firsts.forEach((i) => { gained[this.sideOf[i]] = 1; });
+      winSide = firsts.length === 1 && worst > 1 ? this.sideOf[firsts[0]] : -1;
     } else {
       const firstSides = new Set(ranks.map((r, i) => (r === 1 ? this.sideOf[i] : -1)).filter((s) => s >= 0));
-      if (firstSides.size === 1) winSide = [...firstSides][0];
+      // jeux « à l'addition » (courses) : chaque place compte pour l'équipe, pas seulement le 1er
+      const sumRule = this.lastGame && this.lastGame.team && this.lastGame.team.sum;
+      if (firstSides.size === 1 && !sumRule) winSide = [...firstSides][0];
       else {
         const sum = [0, 0];
         ranks.forEach((r, i) => { sum[this.sideOf[i]] += n - r; });
@@ -480,7 +495,8 @@ wss.on('connection', (ws) => {
     switch (m.t) {
       // ── session ──
       case 'hello': {
-        reply({ t: 'catalog', games: CATALOG });
+        // Render sans base de données : le disque est effacé à chaque déploiement, les comptes avec
+        reply({ t: 'catalog', games: CATALOG, ephemeral: store.kind === 'file' && !!process.env.RENDER });
         const u = m.token ? ACC.readToken(m.token) : null;
         setUser(S, u);
         if (m.token && !u) reply({ t: 'tokenBad' });
@@ -598,7 +614,7 @@ wss.on('connection', (ws) => {
           r = rooms.get(String(m.code || '').toUpperCase().trim());
           if (!r) return fail('Aucune partie avec ce code.');
           if (r === room) return;
-          if (r.members.length >= MAX_MEMBERS) return fail('Salon plein (6 max).');
+          if (r.members.length >= MAX_MEMBERS) return fail(`Salon plein (${MAX_MEMBERS} max).`);
           if (r.state !== 'lobby') return fail('Un match est en cours, réessaie à la fin.');
         }
         if (room) leaveRoom(S);
@@ -642,6 +658,19 @@ wss.on('connection', (ws) => {
       case 'ready':
         room.setRoundReady(member);
         break;
+      case 'chat': {
+        // chat du salon, dispo en salle d'attente comme en pleine partie : 5 messages / 5 s max
+        const text = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+        const now = Date.now();
+        S.chatT = (S.chatT || []).filter((x) => now - x < 5000);
+        if (!text || S.chatT.length >= 5) return;
+        S.chatT.push(now);
+        const msg = { t: 'chat', id: member.id, name: member.name, av: member.avatar, text };
+        room.chatLog.push(msg);
+        if (room.chatLog.length > 40) room.chatLog.shift();
+        room.members.forEach((x) => sendWs(x.ws, msg));
+        break;
+      }
     }
   });
 

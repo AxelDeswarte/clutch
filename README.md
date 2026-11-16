@@ -1,16 +1,22 @@
 # CLUTCH — mini-jeux compétitifs entre potes
 
-Jeu multijoueur dans le navigateur, de 2 à 6 joueurs. Chaque manche tire un mini-jeu au hasard.
+Jeu multijoueur dans le navigateur, de 2 à 10 joueurs. Chaque manche tire un mini-jeu au hasard.
 
 **Modes**
-| Mode | Joueurs | Victoire |
+| Mode | Joueurs | Jeux |
 |---|---|---|
-| 1v1 | 2 | best of N manches |
-| 2v2 · 3v3 | 4 · 6 | le camp du meilleur joueur gagne la manche, best of N |
-| Chacun pour soi | 3 à 6 | N manches, 3 / 2 / 1 pts au podium |
+| Chacun pour soi (mode principal) | 2 à 10 | les 20 mini-jeux |
+| 2v2 · 3v3 | 4 · 6 | les 10 jeux marqués 👥, avec une règle d'équipe chacun |
 
-Le nombre de manches se règle dans le salon (1 à 25). Égalité à la fin = manche décisive.
-Les 20 mini-jeux sont jouables dans tous les modes.
+Règles d'équipe : pas de tir ami (Tank), pas de passe à un coéquipier (Araignée), on ne bouscule que les adversaires
+(Lames, Sol instable, Champ de mines), places additionnées dans les courses (Circuit, Course de haies, Champ de mines),
+code et essais partagés (Code secret).
+
+**Fin de partie** (au choix dans le salon) : un nombre de manches (1 à 25) ou un nombre de points à atteindre (1 à 50).
+Chaque manche rapporte 1 point à son gagnant (ou à son équipe), 0 aux autres. Égalité à la fin = manche décisive,
+égalité en tête aux points = on continue. Déminage et Undercover sont décochés par défaut.
+
+Un chat de salon est dispo partout (salle d'attente et parties), avec l'historique des 40 derniers messages.
 
 **Mini-jeux** (plusieurs inspirés de Machine Party)
 | Jeu | Principe |
@@ -21,19 +27,19 @@ Les 20 mini-jeux sont jouables dans tous les modes.
 | 🧠 Mémoire | recliquer les cases allumées, une de plus par niveau |
 | 🪚 Lames | esquiver scies circulaires et lasers rotatifs |
 | 🏃 Course de haies | alterner ← → et sauter au bon moment |
-| 🔥 Le Filtre | 40 s de tapis infini : tableaux en caisse, ferraille au four, erreur = sonné |
+| 🔥 Le Filtre | 30 s de tapis infini : tableaux en caisse, ferraille au four, erreur = sonné |
 | 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide |
 | 🚬 Pause clope | tirer et relâcher dans la zone verte sans tousser |
 | 🍽️ Bonnes manières | manger quand Tonton ne regarde pas, sinon il tire |
 | 🕷️ L'Araignée | patate chaude : refiler l'araignée-bombe avant l'explosion |
 | 💥 Champ de mines | traverser à l'aveugle, sonar à l'arrêt, moissonneuse aux trousses |
-| 🕵️ Undercover | bluff (variante 1v1 : deviner le mot de l'autre en 2 essais) |
+| 🕵️ Undercover | bluff (à 2 : deviner le mot de l'autre en 2 essais) |
 | 🪖 Tank | ZQSD pour rouler, flèches pour viser, espace pour tirer, 2 vies, caisses destructibles |
-| 🧨 Syllabes | chacun son tour, un mot français qui contient la syllabe avant que la mèche brûle |
-| 🏎️ Circuit | course en vue pilote (route pseudo-3D), turbos au sol, voitures fantômes |
-| 🔐 Code secret | casser un code de 4 couleurs en 10 essais (⚫ bien placé, ⚪ mal placé) |
+| 🧨 Syllabes | chacun son tour, un mot qui contient la syllabe ; la mèche raccourcit (10 s → 3 s) et repart après chaque explosion |
+| 🏎️ Circuit | course en vue pilote (route pseudo-3D), feux de départ, virages, cônes, turbos, voitures fantômes |
+| 🔐 Code secret | casser un code de 4 couleurs en 8 essais, une marque sur chaque boule (⚫ bonne place, ⚪ ailleurs) |
 | 🐍 Serpents | manger pour grandir, ne toucher ni mur ni serpent |
-| 🪶 Envol | un seul bouton pour battre des ailes entre les cheminées |
+| 🪶 Envol | un seul bouton pour battre des ailes entre les cheminées, départ après un 3-2-1 |
 | 🚩 Déminage | la même grille pour tous, premier à tout déminer |
 
 **Comptes, niveaux, skins, amis**

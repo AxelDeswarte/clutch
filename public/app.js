@@ -6,11 +6,11 @@ const ARROW = { up: '⬆', down: '⬇', left: '⬅', right: '➡' };
 // e.code = touche physique : KeyW/A/S/D = ZQSD sur AZERTY et WASD sur QWERTY
 const DIRK = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
 const isTouch = matchMedia('(pointer: coarse)').matches;
-const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff'];
+const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff', '#ff4d6d', '#5b8cff', '#c6f432', '#ff8fd8'];
 const TEAMC = ['#3dd6ff', '#ff5fa2'];
 const TEAMN = ['Équipe Bleue', 'Équipe Rose'];
 const AVATARS = COSMETICS.BASE_AVATARS;
-const MODE_UI = { duel: ['⚔️', '1v1', '2 joueurs'], '2v2': ['👯', '2v2', '4 joueurs'], '3v3': ['🛡️', '3v3', '6 joueurs'], ffa: ['🎉', 'Chacun pour soi', '3 à 6'] };
+const MODE_UI = { ffa: ['🎉', 'Chacun pour soi', '2 à 10 joueurs · tous les jeux'], '2v2': ['👯', '2v2', '4 joueurs · jeux 👥'], '3v3': ['🛡️', '3v3', '6 joueurs · jeux 👥'] };
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 let ws = null, room = null, M = null, scores = [], prevScores = [], roundNo = 0, decisive = false;
@@ -78,6 +78,7 @@ function leaveToMenu() {
 }
 function goHome() {
   stopGame(); cur = null; active = false; dead = false; M = null; introOpen = false; room = null;
+  chatShow(false);
   clearTimeout(toLobbyTimer); toLobbyTimer = null;
   hideOverlay(); hideGag();
   store.del('clutch-resume', true);
@@ -107,7 +108,7 @@ function keysHTML(keys, touch) {
   return `<div class="keys">${keys.map(([groups, action]) => `<div class="krow"><span class="kk">${groups.map((g) => g.map(cap).join('')).join('<span class="kor">ou</span>')}</span><span class="ka">${esc(action)}</span></div>`).join('')}
     ${touch && isTouch ? `<div class="ktouch">📱 Sur téléphone : ${esc(touch)}</div>` : ''}</div>`;
 }
-function overlay({ icon, title, color, text, delay, badge, keys, touch }) {
+function overlay({ icon, title, color, text, delay, badge, keys, touch, teamRule }) {
   clearInterval(countTimer);
   $('#overlay').classList.remove('hidden');
   const card = $('#overlay .ovcard');
@@ -121,7 +122,7 @@ function overlay({ icon, title, color, text, delay, badge, keys, touch }) {
   t.style.setProperty('--c', color || '');
   $('#ovText').textContent = text || '';
   $('#ovText').classList.toggle('goal', !!keys);
-  $('#ovKeys').innerHTML = keysHTML(keys, touch);
+  $('#ovKeys').innerHTML = (teamRule ? `<div class="teamrule">👥 ${esc(teamRule)}</div>` : '') + keysHTML(keys, touch);
   $('#ovGag').innerHTML = '';
   $('#ovList').innerHTML = '';
   $('#ovCount').innerHTML = '';
@@ -285,7 +286,7 @@ function renderLobby() {
   } else {
     $('#teams').innerHTML = `<div class="plist">${r.members.map(row).join('')}</div>`;
   }
-  $('#count').textContent = `${r.members.length}/6`;
+  $('#count').textContent = `${r.members.length}/10`;
   $('#modes').innerHTML = r.modes.map((m) => { const u = MODE_UI[m.key]; return `<div class="mode ${m.key === r.mode ? 'on' : ''}" data-mode="${m.key}"><span class="i">${u[0]}</span><b>${u[1]}</b><small>${u[2]}</small></div>`; }).join('');
   const pts = r.goal === 'points';
   const N = pts ? r.target : r.rounds;
@@ -297,12 +298,15 @@ function renderLobby() {
     <div class="roundsinfo">${pts
       ? twoSides
         ? `Le premier camp à <b>${pl(N, 'point')}</b> gagne la partie. 1 manche gagnée = 1 point.`
-        : `Le premier à <b>${pl(N, 'point')}</b> gagne la partie. À chaque manche, le podium marque 3 / 2 / 1 pts. Égalité en tête = on continue.`
+        : `Le premier à <b>${pl(N, 'point')}</b> gagne la partie. 1 point au gagnant de chaque manche, 0 pour les autres. Égalité en tête = on continue.`
       : twoSides
         ? `Best of ${N} : le premier à <b>${pl(Math.floor(N / 2) + 1, 'manche')}</b> gagnée${Math.floor(N / 2) + 1 > 1 ? 's' : ''} l'emporte. Égalité = manche décisive.`
-        : `${pl(N, 'manche')} · podium 3 / 2 / 1 pts · le plus de points gagne. Égalité = manche décisive.`}</div>`;
-  $('#gamesList').innerHTML = r.games.map((g) => `<button class="gcard ${g.on ? 'on' : ''}" data-game="${g.key}">
-    <span class="tick">${g.on ? '✔' : '✖'}</span><span class="i">${g.icon}</span><b>${esc(g.title)}</b><small>${esc(g.desc)}</small></button>`).join('');
+        : `${pl(N, 'manche')} · 1 point au gagnant de chaque manche · le plus de points gagne (fin anticipée si c'est plié). Égalité = manche décisive.`}</div>`;
+  $('#gamesList').innerHTML = r.games.map((g) => {
+    const out = isTeam && !g.team;
+    return `<button class="gcard ${g.on && !out ? 'on' : ''} ${out ? 'noteam' : ''}" data-game="${g.key}" ${out ? 'disabled title="Pas jouable en équipe"' : ''}>
+    <span class="tick">${out ? '—' : g.on ? '✔' : '✖'}</span><span class="i">${g.icon}</span><b>${esc(g.title)}${g.team ? ' <span title="Jouable en équipe">👥</span>' : ''}</b><small>${out ? 'Pas en équipe' : esc(g.desc)}</small></button>`;
+  }).join('');
   ['#modes', '#rounds', '#gamesList'].forEach((s) => $(s).classList.toggle('nohost', !host));
   $('#btnStart').classList.toggle('hidden', !host);
   $('#btnStart').disabled = !r.canStart;
@@ -324,6 +328,7 @@ function onMsg(m) {
       store.set('clutch-resume', JSON.stringify({ code: m.code, key: m.key }), true);
       history.replaceState(null, '', '?code=' + m.code);
       renderLobby();
+      chatShow(true);
       if (isShown('home')) show('lobby');
       break;
     case 'matchStart':
@@ -337,7 +342,7 @@ function onMsg(m) {
       cur = GAMES[m.game]; active = false; dead = false;
       $('#stage').innerHTML = '';
       cur.init();
-      overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : M.byPoints ? `Manche ${m.round} · premier à ${M.target} pts` : `Manche ${m.round} / ${m.maxRounds}`, keys: m.keys, touch: m.touch });
+      overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : M.byPoints ? `Manche ${m.round} · premier à ${M.target} pts` : `Manche ${m.round} / ${m.maxRounds}`, keys: m.keys, touch: m.touch, teamRule: m.teamRule });
       introOpen = true; readySent = false;
       renderReady(m.ready);
       break;
@@ -371,6 +376,13 @@ function onMsg(m) {
       break;
     case 'catalog':
       CATALOG = m.games;
+      $('#storeWarn').classList.toggle('hidden', !m.ephemeral);
+      break;
+    case 'chat': chatAdd(m); break;
+    case 'chatHist':
+      // historique à l'arrivée ou après un refresh : affiché sans compter comme non lu
+      $('#chatLog').innerHTML = m.list.length ? m.list.map(chatLine).join('') : '<div class="empty">Personne n\'a encore écrit. Dis bonjour 👋</div>';
+      $('#chatLog').scrollTop = $('#chatLog').scrollHeight;
       break;
     case 'kicked':
       kicked = true; store.del('clutch-resume', true);
@@ -984,6 +996,7 @@ GAMES.manners = {
       c.fillStyle = '#5e381f'; c.fillRect(10, 430, 800, 14);
       // ── les convives ──
       const n = M.players.length;
+      const sc = Math.min(1, 5.5 / n); // assiettes plus petites quand on est nombreux
       for (let i = 0; i < n; i++) {
         const x = 90 + (i + 0.5) * (640 / n), py = 372;
         const alive = this.al[i], pr = this.pr[i] || 0, eating = alive && this.e[i] && ph !== 'look';
@@ -993,20 +1006,20 @@ GAMES.manners = {
         }
         // assiette + spaghettis qui diminuent
         c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5;
-        c.beginPath(); c.ellipse(x, py, 44, 20, 0, 0, 7); c.fill(); c.stroke();
+        c.beginPath(); c.ellipse(x, py, 44 * sc, 20 * sc, 0, 0, 7); c.fill(); c.stroke();
         const left = Math.max(0, 1 - pr / 100);
         if (left > 0) {
           c.strokeStyle = '#e8b830'; c.lineWidth = 3;
-          for (let k = 0; k < 8 * left + 1; k++) { c.beginPath(); c.ellipse(x + Math.sin(k * 2.1) * 12 * left, py - 3, 24 * left + 4, 9 * left + 2, k * 0.7, 0, 7); c.stroke(); }
-          c.fillStyle = '#c0392b'; c.beginPath(); c.arc(x, py - 6, 9 * left + 2, 0, 7); c.fill();
+          for (let k = 0; k < 8 * left + 1; k++) { c.beginPath(); c.ellipse(x + Math.sin(k * 2.1) * 12 * left * sc, py - 3, (24 * left + 4) * sc, (9 * left + 2) * sc, k * 0.7, 0, 7); c.stroke(); }
+          c.fillStyle = '#c0392b'; c.beginPath(); c.arc(x, py - 6, (9 * left + 2) * sc, 0, 7); c.fill();
         }
         // la tête du convive (vue de dos) et sa fourchette
         const bob = eating ? Math.sin(now / 70) * 5 : 0;
-        c.font = '46px serif'; c.textAlign = 'center';
+        c.font = Math.round(46 * sc) + 'px serif'; c.textAlign = 'center';
         c.fillText(alive ? P(i).avatar : '💀', x, 462 + bob);
         if (eating) { c.font = '26px serif'; c.fillText('🍴', x + 26, py - 4 - Math.abs(Math.sin(now / 90)) * 30); }
         if (pr >= 100 && alive) strokeText(c, '🏁 FINI', x, py - 34, '#2ee59d', 16);
-        strokeText(c, P(i).name + (i === M.me ? ' (toi)' : ''), x, 300 + 22 - 6, P(i).color, 13);
+        strokeText(c, P(i).name + (i === M.me ? ' (toi)' : ''), x, 300 + 22 - 6, P(i).color, n > 6 ? 11 : 13);
         c.fillStyle = '#1b1440'; c.fillRect(x - 32, py + 26, 64, 7);
         c.fillStyle = P(i).color; c.fillRect(x - 31, py + 27, 62 * Math.min(1, pr / 100), 5);
       }
@@ -1473,7 +1486,7 @@ GAMES.undercover = {
       case 'voted': this.voted = new Set(m.who); this.render(); break;
       case 'out':
         this.phase = 'reveal'; this.alive[m.i] = false; this.roles[m.i] = m; this.tally = m.tally;
-        $('#uct').innerHTML = `${pill(m.i)} est éliminé·e${m.tie ? ' (égalité → tirage au sort)' : ''} : ${m.role === 'undercover' ? '🕵️ UNDERCOVER !' : '😇 civil'} — son mot : « ${esc(m.word)} »`;
+        $('#uct').innerHTML = `${pill(m.i)} est éliminé·e${m.tie ? ' (égalité → tirage au sort)' : ''} : ${m.role === 'undercover' ? '🕵️ UNDERCOVER !' : '😇 civil'}`;
         timerBar($('#ucbar'), 1);
         this.render();
         break;
@@ -1682,6 +1695,28 @@ GAMES.words = {
   stop() { clearTimeout(this.hotT); },
 };
 
+// ── compte à rebours dessiné dans le jeu (Envol, Circuit) : le serveur envoie `go` = secondes restantes ──
+function goTrack(g, m) {
+  const was = g.S.cur && g.S.cur.d.go;
+  if (m.go && Math.ceil(m.go) !== g.goN) { g.goN = Math.ceil(m.go); if (!replaying) SFX.play('tick'); }
+  if (!m.go && was) { g.goEnd = performance.now(); if (!replaying) SFX.play('go'); }
+}
+function drawGo(c, W, H, B, g) {
+  const go = B.go;
+  if (go) {
+    const k = Math.ceil(go);
+    // trois feux : rouges qui s'allument un par un
+    for (let q = 0; q < 3; q++) {
+      const x = W / 2 + (q - 1) * 64;
+      c.fillStyle = '#1b1440'; c.beginPath(); c.arc(x, H * 0.3, 28, 0, 7); c.fill();
+      c.fillStyle = q < 4 - k ? '#ff4d6d' : '#3a3166'; c.beginPath(); c.arc(x, H * 0.3, 21, 0, 7); c.fill();
+    }
+    strokeText(c, String(k), W / 2, H * 0.3 + 110, '#fff', 80);
+  } else if (g.goEnd && performance.now() - g.goEnd < 800) {
+    strokeText(c, 'GO !', W / 2, H * 0.36, '#2ee59d', 90);
+  }
+}
+
 // ── Circuit (vue pilote, route pseudo-3D) ──
 const DRIVEK = { ArrowUp: 'gas', KeyW: 'gas', ArrowDown: 'brake', KeyS: 'brake', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 function drawCar(c, cx, by, w, color, avatar, tilt = 0) {
@@ -1729,7 +1764,7 @@ GAMES.circuit = {
       if (replaying) { this.last = 'reset'; this.sendDrive(); }
       this.loop();
     }
-    if (m.k === 's') pushSnap(this.S, m);
+    if (m.k === 's') { goTrack(this, m); pushSnap(this.S, m); }
     if (m.k === 'boost' && m.i === M.me) SFX.play('whoosh');
     if (m.k === 'crash' && m.i === M.me) { this.crashT = performance.now(); SFX.play('bonk'); }
     if (m.k === 'fin') { this.done.add(m.i); legendSet(m.i, `🏁 ${m.tm.toFixed(2)} s`); SFX.play(m.i === M.me ? 'win' : 'ding'); }
@@ -1833,6 +1868,7 @@ GAMES.circuit = {
       if (this.done.has(me)) strokeText(c, '🏁 ARRIVÉ !', W / 2, 120, '#2ee59d', 40);
       c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(150, 12, W - 300, 8);
       B.forEach((p, i) => { c.fillStyle = P(i).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2; c.beginPath(); c.arc(150 + (W - 300) * Math.min(1, p[0] / this.LEN), 16, i === me ? 8 : 6, 0, 7); c.fill(); c.stroke(); });
+      drawGo(c, W, H, S.cur.d, this);
     };
     draw();
   },
@@ -1869,14 +1905,15 @@ GAMES.code = {
     else if (e.key === 'Backspace') { e.preventDefault(); if (!this.locked()) { this.g.pop(); this.render(); } }
     else if (e.key === 'Enter') { e.preventDefault(); this.submit(); }
   },
-  dot(k, extra = '') { return `<span class="cdot ${k == null ? 'empty' : ''}" ${extra} style="${k == null ? '' : `background:${CODE_COLORS[k]}`}"></span>`; },
+  dot(k, extra = '', mark = '') { return `<span class="cdot ${k == null ? 'empty' : ''} ${mark ? 'mk-' + mark : ''}" ${extra} style="${k == null ? '' : `background:${CODE_COLORS[k]}`}"></span>`; },
   render() {
     $('#cslots').innerHTML = range(this.len).map((k) => (this.g[k] != null ? `<button class="cdot" data-k="${k}" style="background:${CODE_COLORS[this.g[k]]}" title="Retirer"></button>` : this.dot(null))).join('');
-    // pions sur une ligne (⚫ d'abord, puis ⚪) + le compte en toutes lettres : ils ne désignent PAS une position
+    // la marque est posée SUR la boule concernée : ⚫ bonne place, ⚪ présente ailleurs, rien = pas dans le code
     const say = (h) => (h.b + h.w === 0 ? 'aucune couleur du code' : [h.b && `${h.b} bien placée${h.b > 1 ? 's' : ''}`, h.w && `${h.w} mal placée${h.w > 1 ? 's' : ''}`].filter(Boolean).join(' · '));
-    $('#chist').innerHTML = (this.hist.length ? '<div class="chead">⚫ bonne couleur à la bonne place · ⚪ bonne couleur à la mauvaise place · l\'ordre des pions ne suit pas les cases</div>' : '')
-      + this.hist.slice().reverse().map((h) => `<div class="crow chrow"><b class="cn">${h.n}.</b>${h.g.map((k) => this.dot(k)).join('')}
-      <span class="pegs">${range(this.len).map((k) => `<span class="peg ${k < h.b ? 'b' : k < h.b + h.w ? 'w' : ''}"></span>`).join('')}</span><span class="csay">${say(h)}</span></div>`).join('');
+    const who = (h) => (M.teams && h.who != null && h.who !== M.me ? ` <span class="mut">(${esc(P(h.who).name)})</span>` : '');
+    $('#chist').innerHTML = (this.hist.length ? '<div class="chead"><span class="cdot mk-b mini"></span> bonne couleur, bonne place · <span class="cdot mk-w mini"></span> couleur présente mais ailleurs · sans marque = pas dans le code</div>' : '')
+      + this.hist.slice().reverse().map((h) => `<div class="crow chrow"><b class="cn">${h.n}.</b>${h.g.map((k, x) => this.dot(k, '', h.mk ? h.mk[x] : '')).join('')}
+      <span class="csay">${say(h)}${who(h)}</span></div>`).join('');
     $('#cgo').disabled = this.g.length !== this.len || this.locked();
   },
   msg(m) {
@@ -1968,6 +2005,7 @@ GAMES.flap = {
     if (m.k === 'flap') { Object.assign(this, { W: m.w, H: m.h, BX: m.bx, BR: m.br, PW: m.pw, gates: m.gates }); this.loop(); }
     if (m.k === 's') {
       if (this.S.cur) m.p.forEach((p, i) => { if (!p[1] && this.S.cur.d.p[i][1]) legendSet(i, '💀'); });
+      goTrack(this, m);
       pushSnap(this.S, m);
     }
   },
@@ -2013,6 +2051,7 @@ GAMES.flap = {
       });
       const passed = this.gates.filter(([x]) => x + this.PW < this.BX + d).length;
       strokeText(c, `🏭 ${passed}`, 50, 34, '#fff', 24);
+      drawGo(c, W, H, B, this);
     };
     draw();
   },
@@ -2089,6 +2128,48 @@ GAMES.mines2 = {
   },
   stop() { clearTimeout(this.st); clearTimeout(this.lp); },
 };
+
+// ════════════════ chat du salon ════════════════
+// Dispo dans le salon et pendant les parties. Fermé : un compteur + les derniers messages en aperçu 5 s.
+let chatOpen = false, chatUnread = 0;
+const chatLine = (m) => `<div class="cm"><b style="color:${PALETTE[m.id % PALETTE.length]};-webkit-text-stroke:.4px var(--line)">${esc(m.av)} ${esc(m.name)}</b> ${esc(m.text)}</div>`;
+function chatAdd(m) {
+  const log = $('#chatLog');
+  const empty = log.querySelector('.empty'); if (empty) empty.remove();
+  log.insertAdjacentHTML('beforeend', chatLine(m));
+  while (log.children.length > 80) log.firstChild.remove();
+  log.scrollTop = log.scrollHeight;
+  if (chatOpen || (room && m.id === room.you)) return; // ses propres messages ne sont pas « non lus »
+  chatUnread++; $('#chatN').textContent = chatUnread; $('#chatN').classList.remove('hidden');
+  const pk = $('#chatPeek');
+  pk.insertAdjacentHTML('beforeend', chatLine(m));
+  const el = pk.lastElementChild; setTimeout(() => el.remove(), 5000);
+  while (pk.children.length > 3) pk.firstChild.remove();
+  if (!replaying) SFX.play('tick');
+}
+function chatToggle(open = !chatOpen) {
+  chatOpen = open;
+  $('#chatBox').classList.toggle('hidden', !open);
+  if (!open) return;
+  chatUnread = 0; $('#chatN').classList.add('hidden'); $('#chatPeek').innerHTML = '';
+  $('#chatLog').scrollTop = $('#chatLog').scrollHeight; $('#chatIn').focus();
+}
+function chatShow(on) {
+  $('#chat').classList.toggle('hidden', !on);
+  if (on) return;
+  chatToggle(false); chatUnread = 0; $('#chatN').classList.add('hidden'); $('#chatPeek').innerHTML = '';
+  $('#chatLog').innerHTML = '<div class="empty">Personne n\'a encore écrit. Dis bonjour 👋</div>';
+}
+chatShow(false);
+$('#chatBtn').onclick = () => chatToggle();
+$('#chatForm').onsubmit = (e) => {
+  e.preventDefault();
+  const v = $('#chatIn').value.trim();
+  // Entrée sur un champ vide = on referme et on rend le clavier au jeu
+  if (!v) { chatToggle(false); $('#chatIn').blur(); return; }
+  send({ t: 'chat', text: v }); $('#chatIn').value = '';
+};
+$('#chatIn').addEventListener('keydown', (e) => { if (e.key === 'Escape') { chatToggle(false); $('#chatIn').blur(); } });
 
 // ════════════════ accueil / salon ════════════════
 const params = new URLSearchParams(location.search);
