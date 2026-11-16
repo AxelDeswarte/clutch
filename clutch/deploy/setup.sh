@@ -35,7 +35,7 @@ echo "==> Code du jeu → $APP_DIR"
 id clutch >/dev/null 2>&1 || useradd --system --home-dir "$APP_DIR" --shell /usr/sbin/nologin clutch
 mkdir -p "$APP_DIR"
 if [ "$SRC_DIR" != "$APP_DIR" ]; then
-  rsync -a --delete --exclude node_modules --exclude .git "$SRC_DIR"/ "$APP_DIR"/
+  rsync -a --delete --exclude node_modules --exclude .git --exclude data "$SRC_DIR"/ "$APP_DIR"/
 fi
 cd "$APP_DIR"
 npm install --omit=dev --no-audit --no-fund

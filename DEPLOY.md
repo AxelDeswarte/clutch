@@ -1,8 +1,38 @@
-# Mettre CLUTCH en ligne sur un VPS OVHcloud
+# Mettre CLUTCH en ligne
+
+## Option gratuite : Render + Neon (recommandée)
+
+### 1. Le jeu sur Render
+Dépôt GitHub → render.com → **New → Web Service** → Region **Frankfurt**, Build `npm install`, Start `npm start`, Instance **Free**, Health Check Path `/health`.
+
+### 2. La base de données des comptes sur Neon (obligatoire pour les comptes)
+Le disque de Render gratuit est effacé à chaque mise en veille : sans base externe, les comptes, l'XP et les amis disparaîtraient.
+
+1. Crée un compte gratuit sur **neon.com** → **New Project** → région **AWS Europe (Frankfurt)**.
+2. Sur le tableau de bord du projet, clique **Connect** et copie la *connection string* (elle commence par `postgresql://` et finit par `?sslmode=require`).
+3. Sur Render → ton service → **Environment** → **Add Environment Variable** :
+   - `DATABASE_URL` = la chaîne copiée
+4. Sauvegarde : Render redéploie. Dans les logs tu dois voir `Comptes : stockage postgres`.
+
+La table est créée automatiquement au premier démarrage. Rien d'autre à faire.
+
+*(Optionnel)* `CLUTCH_SECRET` = une longue chaîne aléatoire. Sinon un secret est généré et stocké dans la base tout seul.
+
+### Mettre à jour
+```powershell
+git add -A
+git commit -m "mise à jour"
+git push
+```
+Render redéploie automatiquement. Les parties en cours sont coupées, mais les comptes sont conservés.
+
+---
+
+## Option payante : VPS (OVH, Hostinger…)
 
 Compte ~15 minutes la première fois. Ensuite, une mise à jour prend 30 secondes.
 
-## Pourquoi OVH plutôt que Hostinger
+### Pourquoi OVH plutôt que Hostinger
 
 - **Serveurs en France** (Gravelines, Roubaix, Strasbourg) : le meilleur ping pour vous, et ça compte pour Tron, Esquive et Réflexe.
 - **Facturation au mois, sans engagement.** Chez Hostinger, le prix d'appel du KVM 1 demande de payer 24 mois d'avance, puis double au renouvellement.
@@ -75,3 +105,6 @@ Attention, la mise à jour redémarre le serveur : les parties en cours sont cou
 - **Le site ne charge pas** : `systemctl status clutch` puis `sudo journalctl -u clutch -n 50`.
 - **« HTTPS pas configuré »** : en général le domaine n'est pas encore propagé. Relance le script 10 minutes plus tard.
 - **Connexion perdue en pleine partie** : regarde si le serveur a redémarré (`journalctl`). Un joueur qui ferme son onglet coupe aussi la manche pour tout le monde (retour au salon).
+
+
+Sur un VPS, les comptes sont enregistrés dans `/opt/clutch/data/db.json` (conservé lors des mises à jour). Tu peux aussi définir `DATABASE_URL` pour utiliser Postgres.

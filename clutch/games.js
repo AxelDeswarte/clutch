@@ -159,7 +159,7 @@ GAMES.tron = {
   desc: "Coince les autres avec ton trait",
   title: 'Tron',
   min: 2,
-  rules: 'Dirige ton trait (flèches ou ZQSD). Touche un bord ou un trait = éliminé. Coince les autres !',
+  rules: 'Dirige ton trait (flèches ou ZQSD). Touche un bord ou un trait = éliminé. Coince les autres ! Ça continue jusqu\'au dernier survivant, même en équipe.',
   create(room) {
     const n = room.n;
     const W = n <= 2 ? 48 : 64, H = n <= 2 ? 32 : 42, TICK = 65;
@@ -199,7 +199,7 @@ GAMES.tron = {
       died.forEach((i) => { p[i].alive = false; deathTick[i] = tick; });
       room.send({ t: 'g', k: 'tick', h: next, d: died });
       died.forEach((i) => room.eliminate(i));
-      if (room.survivalOver(p.map((a) => a.alive))) room.finish(deathTick);
+      if (p.filter((a) => a.alive).length <= 1) room.finish(deathTick);
     }
 
     return {
@@ -491,44 +491,39 @@ const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex
 const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🪛', 'Tournevis'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
 GAMES.filter = {
   icon: '🔥',
-  desc: 'Trie les portraits et la ferraille',
+  desc: 'Trie à ton rythme : tableaux en caisse, ferraille au four',
   title: 'Le Filtre',
   min: 2,
-  rules: "Un tapis roulant. Quand un objet passe dans la zone jaune, trie-le : ⬅ ou Q = 🔥 FOUR pour les PORTRAITS 🖼️ · ➡ ou D = 📦 CAISSE pour la FERRAILLE 🔩. Bonne décision +1, mauvaise ou oubliée −1. Ça accélère. Le pire trieur finit au four.",
+  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. ⬅ ou Q = 🔥 FOUR pour la FERRAILLE 🔩 · ➡ ou D = 📦 CAISSE pour les TABLEAUX 🖼️. Une erreur = tu es sonné 1,5 s. Premier à trier 25 objets gagne.",
   create(room) {
-    const n = room.n, N = 30, HALF = 300, TOL = 160;
-    const items = [];
-    let t = 2400;
-    for (let k = 0; k < N; k++) {
+    const n = room.n, N = 25, STUN = 1500;
+    const items = Array.from({ length: N }, () => {
       const frame = Math.random() < 0.5;
       const [e, name] = pick(frame ? FRAMES : PARTS);
-      items.push({ e, n: name, f: frame, t: Math.round(t) });
-      t += Math.max(430, 1050 - k * 24) + Math.random() * 160;
-    }
-    const dec = range(n).map(() => new Map());
-    const score = new Array(n).fill(0);
-    let t0 = 0;
+      return { e, n: name, f: frame };
+    });
+    const pos = new Array(n).fill(0), stun = new Array(n).fill(0);
+    const race = new Race(room);
+    const end = () => room.finish(race.scores(pos.map((p) => p / N)));
     return {
       start() {
-        t0 = Date.now();
-        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n, t: x.t })), half: HALF });
-        items.forEach((it, k) => room.later(() => {
-          // 1 = bon tri, 0 = mauvais bac, 2 = oublié
-          const res = range(n).map((i) => {
-            const d = dec[i].get(k);
-            const r = d === undefined ? 2 : (d === 0) === it.f ? 1 : 0;
-            score[i] += r === 1 ? 1 : -1;
-            return r;
-          });
-          room.send({ t: 'g', k: 'res', idx: k, res, s: score });
-          if (k === N - 1) room.later(() => room.finish([...score], 'Scores : ' + range(n).map((i) => `${room.name(i)} ${score[i]}`).join(' · ')), 600);
-        }, it.t + HALF + TOL + 50));
+        room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n })), n: N, stun: STUN });
+        room.later(end, 90000);
       },
       input(i, m) {
-        if (m.a !== 'sort' || (m.b !== 0 && m.b !== 1)) return;
-        const el = Date.now() - t0;
-        const k = items.findIndex((it, kk) => !dec[i].has(kk) && Math.abs(el - it.t) <= HALF + TOL);
-        if (k >= 0) dec[i].set(k, m.b);
+        if (m.a !== 'sort' || race.done[i] || (m.b !== 0 && m.b !== 1)) return;
+        const now = Date.now();
+        if (now < stun[i]) return;
+        // 0 = four (ferraille), 1 = caisse (tableaux)
+        const want = items[pos[i]].f ? 1 : 0;
+        if (m.b === want) {
+          pos[i]++;
+          room.send({ t: 'g', k: 'prog', pos });
+          if (pos[i] >= N) race.finish(i, end);
+        } else {
+          stun[i] = now + STUN;
+          room.send({ t: 'g', k: 'stun', i, ms: STUN });
+        }
       },
     };
   },
@@ -599,19 +594,19 @@ GAMES.smoke = {
   desc: 'Tire sur ta clope sans tousser',
   title: 'Pause clope',
   min: 2,
-  rules: "Maintiens ESPACE pour tirer, relâche dans la zone verte = une taffe. Trop long = tu tousses (bloqué 2 s). Trop court = taffe gâchée. Chaque taffe a son propre rythme. 25 secondes : le pire fumeur se fait abattre.",
+  rules: "Maintiens ESPACE pour tirer, relâche dans la zone verte = une taffe. Trop long = tu tousses (bloqué 1,5 s). Trop court = taffe gâchée. Ça va vite et chaque taffe a son propre rythme. 25 secondes : le pire fumeur se fait abattre.",
   create(room) {
-    const n = room.n, LO = 78, HI = 93;
+    const n = room.n, LO = 75, HI = 93;
     const st = range(n).map(() => ({ s: 'idle', t: 0, fill: 1400, tm: null }));
     const puffs = new Array(n).fill(0);
-    const newFill = () => ri(650, 2000);
+    const newFill = () => ri(380, 1100);
     let live = false;
     function setIdle(i) { st[i].s = 'idle'; st[i].fill = newFill(); room.send({ t: 'g', k: 'next', fill: st[i].fill }, i); }
     function cough(i) {
       room.cancel(st[i].tm);
       st[i].s = 'cough';
       room.send({ t: 'g', k: 'cough', i });
-      st[i].tm = room.later(() => setIdle(i), 2000);
+      st[i].tm = room.later(() => setIdle(i), 1500);
     }
     return {
       start() {
@@ -635,7 +630,7 @@ GAMES.smoke = {
           if (ok) puffs[i]++;
           room.send({ t: 'g', k: 'puff', i, ok, lung: Math.round(lung), puffs });
           S.s = 'out';
-          S.tm = room.later(() => setIdle(i), 650);
+          S.tm = room.later(() => setIdle(i), 350);
         }
       },
     };

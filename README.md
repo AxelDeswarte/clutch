@@ -21,13 +21,19 @@ Les 13 mini-jeux sont jouables dans tous les modes.
 | 🧠 Mémoire | recliquer les cases allumées, une de plus par niveau |
 | 🪚 Lames | esquiver scies circulaires et lasers rotatifs |
 | 🏃 Course de haies | alterner ← → et sauter au bon moment |
-| 🔥 Le Filtre | tapis roulant : brûler les portraits, laisser passer la ferraille |
+| 🔥 Le Filtre | tapis à ton rythme : tableaux en caisse, ferraille au four, erreur = sonné |
 | 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide |
 | 🚬 Pause clope | tirer et relâcher dans la zone verte sans tousser |
 | 🍽️ Bonnes manières | manger quand Tonton ne regarde pas, sinon il tire |
 | 🕷️ L'Araignée | patate chaude : refiler l'araignée-bombe avant l'explosion |
 | 💥 Champ de mines | traverser à l'aveugle, sonar à l'arrêt, moissonneuse aux trousses |
 | 🕵️ Undercover | bluff (variante 1v1 : deviner le mot de l'autre en 2 essais) |
+
+**Comptes, niveaux, skins, amis**
+- Compte (pseudo + mot de passe) ou jeu en invité.
+- XP à chaque match : participation, manches gagnées, victoire. Chaque niveau débloque des avatars, des cadres (Néon, Sanglant, Or, En feu, Glitch, Néant…) et des titres.
+- Amis : ajout par pseudo, statut en direct (en ligne, dans un salon, en partie), bouton **Rejoindre** et invitations.
+- Refresh ou coupure réseau : tu reviens automatiquement dans ton salon ou dans la manche en cours (45 s pour revenir).
 
 L'hôte du salon (👑) choisit le mode, la durée et les mini-jeux actifs.
 Chaque élimination déclenche une animation débile avec son. Le son se coupe avec le bouton 🔊 en bas à droite.
@@ -47,7 +53,9 @@ Voir **[DEPLOY.md](DEPLOY.md)** : VPS OVHcloud + un script qui installe tout (`d
 
 ## Architecture
 
-- `server.js` : HTTP statique, WebSocket, salons, modes, scores.
+- `server.js` : HTTP statique, WebSocket, salons, modes, scores, reconnexion, présence des amis.
+- `accounts.js` / `store.js` : comptes (mots de passe scrypt, jetons signés HMAC), amis, XP. Stockage Postgres si `DATABASE_URL` est défini (Neon), sinon fichier `data/db.json`.
+- `public/cosmetics.js` : niveaux et catalogue des skins, partagé client/serveur.
 - `games.js` : logique des 9 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
 - `public/app.js` : client (salon, affichage de chaque jeu, interpolation pour Esquive et Course).
 - `public/gags.js` : animations d'élimination (Web Animations API) + sons synthétisés (WebAudio, aucun fichier audio).

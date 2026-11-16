@@ -9,38 +9,87 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff'];
 const TEAMC = ['#3dd6ff', '#ff5fa2'];
 const TEAMN = ['Équipe Bleue', 'Équipe Rose'];
-const AVATARS = ['🦊', '🐸', '🐼', '🐙', '🦄', '🐷', '🐵', '🦖', '👽', '🤖', '💩', '🤡', '👻', '🍆', '🍑', '🌮', '🧀', '🦆', '🐔', '🦍', '🐌', '🍄', '🎃', '🥑'];
+const AVATARS = COSMETICS.BASE_AVATARS;
 const MODE_UI = { duel: ['⚔️', '1v1', '2 joueurs'], '2v2': ['👯', '2v2', '4 joueurs'], '3v3': ['🛡️', '3v3', '6 joueurs'], ffa: ['🎉', 'Chacun pour soi', '3 à 6'] };
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 let ws = null, room = null, M = null, scores = [], prevScores = [], roundNo = 0, decisive = false;
 let cur = null, active = false, dead = false;
 let toLobbyTimer = null, countTimer = null, gagTimer = null, introOpen = false;
+let me = null, friendsData = null, replaying = false, kicked = false, reconnectTimer = null;
 let myAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
-try { myAvatar = localStorage.getItem('clutch-avatar') || myAvatar; } catch {}
+try { const a = localStorage.getItem('clutch-avatar'); if (AVATARS.includes(a)) myAvatar = a; } catch {}
 
 const P = (i) => M.players[i];
 const range = (n) => [...Array(n).keys()];
-const pill = (i, extra = '') => `<span class="pill" style="background:${P(i).color}"><span class="av">${esc(P(i).avatar)}</span>${esc(P(i).name)}${i === M.me ? ' (toi)' : ''}${extra}</span>`;
+const pillRaw = (o, color, extra = '') => `<span class="pill fr-${o.frame || 'classic'}" style="background:${color};--pc:${color}"><span class="av">${esc(o.avatar)}</span>${esc(o.name)}${o.level ? ` <span class="lv">${o.level}</span>` : ''}${extra}</span>`;
+const pill = (i, extra = '') => pillRaw(P(i), P(i).color, (i === M.me ? ' (toi)' : '') + extra);
 const sideLabel = (s) => (M.teams ? M.sideNames[s] : P(M.sides[s][0]).name);
 const sideColor = (s) => (M.teams ? TEAMC[s] : P(M.sides[s][0]).color);
 
 // ════════════════ réseau ════════════════
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
-function connect(then) {
-  if (ws && ws.readyState === 1) return then();
+const pending = [];
+function send(o) {
+  if (ws && ws.readyState === 1) return ws.send(JSON.stringify(o));
+  if (o.t !== 'input') pending.push(o); // les inputs de jeu périmés ne servent à rien
+  connect();
+}
+const store = {
+  get: (k, ses) => { try { return (ses ? sessionStorage : localStorage).getItem(k); } catch { return null; } },
+  set: (k, v, ses) => { try { (ses ? sessionStorage : localStorage).setItem(k, v); } catch {} },
+  del: (k, ses) => { try { (ses ? sessionStorage : localStorage).removeItem(k); } catch {} },
+};
+// Connexion ouverte dès le chargement ; si elle saute (refresh, réseau), on se reconnecte
+// et le serveur nous remet dans notre salon / notre manche grâce à la clé de reprise.
+function connect() {
+  if (kicked || (ws && ws.readyState <= 1)) return;
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-  ws.onopen = then;
+  ws.onopen = () => {
+    $('#netbar').classList.add('hidden');
+    let resume = null;
+    try { resume = JSON.parse(store.get('clutch-resume', true) || 'null'); } catch {}
+    ws.send(JSON.stringify({ t: 'hello', token: store.get('clutch-token'), resume }));
+    pending.splice(0).forEach((o) => ws.send(JSON.stringify(o)));
+  };
   ws.onmessage = (e) => onMsg(JSON.parse(e.data));
   ws.onclose = () => {
-    ws = null; stopGame(); cur = null; active = false; M = null;
-    hideOverlay(); hideGag(); show('home');
-    $('#homeErr').textContent = 'Connexion au serveur perdue 😢';
+    ws = null;
+    if (kicked) return;
+    $('#netbar').classList.remove('hidden');
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 1500);
   };
 }
 
 // ════════════════ UI de base ════════════════
-function show(id) { document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('hidden', s.id !== id)); }
+function show(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('hidden', s.id !== id));
+  $('#topbar').classList.toggle('hidden', id === 'home');
+  document.body.classList.toggle('withbar', id !== 'home');
+}
+// retour au menu : quitte le salon (et le match en cours, après confirmation)
+function backToMenu() {
+  if (M) confirmBox("Quitter le match en cours ? Ça l'arrête pour tout le monde.", leaveToMenu);
+  else leaveToMenu();
+}
+function leaveToMenu() {
+  if (room) send({ t: 'leave' });
+  goHome();
+}
+function goHome() {
+  stopGame(); cur = null; active = false; dead = false; M = null; introOpen = false; room = null;
+  clearTimeout(toLobbyTimer); toLobbyTimer = null;
+  hideOverlay(); hideGag();
+  store.del('clutch-resume', true);
+  history.replaceState(null, '', location.pathname);
+  show('home');
+}
+function confirmBox(text, onYes) {
+  $('#cfText').textContent = text;
+  $('#confirmBox').classList.remove('hidden');
+  $('#cfYes').onclick = () => { $('#confirmBox').classList.add('hidden'); onYes(); };
+  $('#cfNo').onclick = () => $('#confirmBox').classList.add('hidden');
+}
 function isShown(id) { return !$('#' + id).classList.contains('hidden'); }
 function shake(el) { if (!el) return; el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
 function bump(el) { if (!el) return; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
@@ -87,14 +136,30 @@ function startCount(ms) {
 }
 function renderReady(list) {
   if (!M) return;
+  const box = $('#ovReady');
+  if (!box.querySelector('.readyrow')) {
+    box.innerHTML = `<div class="readyrow"></div>
+      <button class="btn big green" id="btnReady" type="button">✅ J'ai lu, prêt ! <span style="font-size:14px">(Espace / Entrée)</span></button>
+      <p class="mut hidden" id="readyWait"></p>`;
+    const b = $('#btnReady');
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); sendReady(); });
+    b.addEventListener('click', sendReady);
+  }
   const meReady = list[M.me];
-  const n = list.filter(Boolean).length;
-  $('#ovReady').innerHTML = `<div class="readyrow">${M.players.map((p, i) => `<span class="pill" style="background:${list[i] ? p.color : '#ece7f7'};${list[i] ? '' : 'opacity:.65'}"><span class="av">${esc(p.avatar)}</span>${esc(p.name)}${i === M.me ? ' (toi)' : ''} ${list[i] ? '✔' : '…'}</span>`).join('')}</div>
-    ${meReady ? `<p class="mut">✔ Prêt — en attente des autres (${n}/${list.length})</p>` : `<button class="btn big green" id="btnReady">✅ J'ai lu, prêt ! <span style="font-size:14px">(Entrée)</span></button>`}`;
-  const b = $('#btnReady');
-  if (b) b.onclick = sendReady;
+  box.querySelector('.readyrow').innerHTML = M.players.map((p, i) => `<span style="opacity:${list[i] ? 1 : 0.55}">${pill(i, ` ${list[i] ? '✔' : '…'}`)}</span>`).join('');
+  $('#btnReady').classList.toggle('hidden', !!meReady);
+  $('#readyWait').classList.toggle('hidden', !meReady);
+  $('#readyWait').textContent = `✔ Prêt — en attente des autres (${list.filter(Boolean).length}/${list.length})`;
 }
-function sendReady() { if (introOpen) { SFX.unlock(); send({ t: 'ready' }); } }
+let readySent = false;
+function sendReady() {
+  if (!introOpen || readySent) return;
+  readySent = true;
+  SFX.unlock();
+  send({ t: 'ready' });
+  $('#btnReady') && $('#btnReady').classList.add('hidden');
+  $('#readyWait') && $('#readyWait').classList.remove('hidden');
+}
 function hideOverlay() { clearInterval(countTimer); $('#overlay').classList.add('hidden'); $('#ovGag').innerHTML = ''; }
 function hideGag() { clearTimeout(gagTimer); $('#gagLayer').classList.add('hidden'); $('#gagLayer .gwrap').innerHTML = ''; }
 
@@ -195,7 +260,11 @@ function renderLobby() {
   $('#lobbyResult').classList.toggle('hidden', !r.lastResult);
   $('#lobbyResult').textContent = r.lastResult || '';
   const isTeam = r.mode === '2v2' || r.mode === '3v3';
-  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''}"><span class="av">${esc(m.avatar)}</span><span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}</span>${m.id === r.host ? '👑' : ''}</div>`;
+  const canAdd = (m) => me && m.uid && m.uid !== me.id && friendsData && !friendsData.friends.some((f) => f.id === m.uid) && !friendsData.reqOut.some((f) => f.id === m.uid);
+  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''} ${m.offline ? 'off' : ''}"><span class="av fr-${m.frame || 'classic'}" style="--pc:#ffd23f">${esc(m.avatar)}</span>
+    <span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}${m.level ? ` <span class="lv">${m.level}</span>` : ' <span class="mut" style="font-size:11px">invité</span>'}
+    ${m.title ? `<small class="ptitle">${esc(COSMETICS.titleName(m.title))}</small>` : ''}</span>
+    ${m.offline ? '<span title="Déconnecté, on l\'attend">🔌</span>' : ''}${canAdd(m) ? `<button class="btn sm white" data-addfriend="${esc(m.name)}" title="Ajouter en ami">➕</button>` : ''}${m.id === r.host ? '👑' : ''}</div>`;
   if (isTeam) {
     const size = r.mode === '2v2' ? 2 : 3;
     $('#teams').innerHTML = [0, 1].map((t) => {
@@ -222,17 +291,21 @@ function renderLobby() {
   $('#btnStart').classList.toggle('hidden', !host);
   $('#btnStart').disabled = !r.canStart;
   $('#lobbyMsg').textContent = r.hint || (host ? 'Tout est prêt, lance quand tu veux !' : "⏳ En attente que l'hôte 👑 lance la partie…");
-  avatarGrid($('#avGridLobby'), (x) => { setAvatar(x); send({ t: 'avatar', avatar: x }); });
+  $('#guestAv').classList.toggle('hidden', !!me);
+  $('#btnCustomLobby').classList.toggle('hidden', !me);
+  if (!me) avatarGrid($('#avGridLobby'), (x) => { setAvatar(x); send({ t: 'avatar', avatar: x }); });
+  renderFriends();
 }
 
 // ════════════════ messages serveur ════════════════
 function onMsg(m) {
   switch (m.t) {
     case 'error':
-      (isShown('home') ? $('#homeErr') : $('#lobbyMsg')).textContent = m.msg;
+      if (isShown('home')) $('#homeErr').textContent = m.msg; else toast('⚠️ ' + m.msg);
       break;
     case 'room':
       room = m;
+      store.set('clutch-resume', JSON.stringify({ code: m.code, key: m.key }), true);
       history.replaceState(null, '', '?code=' + m.code);
       renderLobby();
       if (isShown('home')) show('lobby');
@@ -249,7 +322,7 @@ function onMsg(m) {
       $('#stage').innerHTML = '';
       cur.init();
       overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : `Manche ${m.round} / ${m.maxRounds}` });
-      introOpen = true;
+      introOpen = true; readySent = false;
       renderReady(m.ready);
       break;
     case 'readyState':
@@ -262,7 +335,7 @@ function onMsg(m) {
       break;
     case 'g':
       if (!cur || !M) break;
-      if (!active) { active = true; hideOverlay(); SFX.play('go'); }
+      if (!active) { active = true; hideOverlay(); if (!replaying) SFX.play('go'); }
       cur.msg(m);
       break;
     case 'elim': onElim(m); break;
@@ -272,12 +345,52 @@ function onMsg(m) {
       showRoundEnd(m);
       break;
     case 'matchEnd': showMatchEnd(m); break;
+    case 'resync': resync(m); break;
+    case 'resumeFail':
+      store.del('clutch-resume', true);
+      if (!room) { show('home'); }
+      break;
+    case 'left':
+      goHome();
+      break;
+    case 'catalog':
+      CATALOG = m.games;
+      break;
+    case 'kicked':
+      kicked = true; store.del('clutch-resume', true);
+      document.body.innerHTML = `<div class="card" style="margin:60px auto;max-width:420px;text-align:center"><h2>👋 ${esc(m.msg)}</h2><p class="mut">Tu peux fermer cet onglet.</p></div>`;
+      break;
     case 'aborted':
       stopGame(); cur = null; active = false; M = null;
       clearTimeout(toLobbyTimer); toLobbyTimer = null;
       hideOverlay(); hideGag(); show('lobby');
       setTimeout(() => { $('#lobbyMsg').textContent = '⚠️ ' + m.msg; }, 50);
       break;
+    default:
+      onAccountMsg(m);
+  }
+}
+
+// Retour après un refresh : on reconstruit l'écran du match là où il en est
+function resync(m) {
+  clearTimeout(toLobbyTimer); toLobbyTimer = null;
+  stopGame(); hideGag(); hideOverlay();
+  M = m.match; scores = m.scores; prevScores = [...m.scores]; roundNo = m.round; decisive = m.intro && m.intro.decisive;
+  show('game'); renderScore();
+  if (!m.intro) return;
+  cur = GAMES[m.intro.game]; active = false; dead = false;
+  $('#stage').innerHTML = '';
+  cur.init();
+  if (m.state === 'intro') {
+    onMsg({ ...m.intro, ready: m.ready });
+    if (m.launching) onMsg({ t: 'countdown', ms: 1500 });
+  } else if (m.state === 'round') {
+    replaying = true; SFX.hush(true);
+    try { m.log.forEach((x) => onMsg(x)); } finally { replaying = false; SFX.hush(false); }
+    if (!active) hideOverlay();
+    toast('🔄 Reconnecté — tu reprends la manche en cours');
+  } else {
+    overlay({ icon: '🔄', title: 'Reconnecté !', text: 'La prochaine manche arrive…' });
   }
 }
 
@@ -285,6 +398,7 @@ function stopGame() { if (cur && cur.stop) { try { cur.stop(); } catch {} } }
 
 function onElim(m) {
   if (!M) return;
+  if (replaying) { if (m.i === M.me) dead = true; return; }
   const name = P(m.i).name, color = P(m.i).color, other = P(m.o).name;
   const extra = m.role ? (m.role === 'undercover' ? " — c'était l'UNDERCOVER 🕵️" : " — c'était un civil 😇") : '';
   if (m.i === M.me) {
@@ -360,7 +474,7 @@ function showMatchEnd(m) {
 // ════════════════ entrées clavier ════════════════
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if (introOpen && e.key === 'Enter') { e.preventDefault(); sendReady(); return; }
+  if (introOpen && (e.key === 'Enter' || e.code === 'Space')) { e.preventDefault(); sendReady(); return; }
   if (active && !dead && cur && cur.key) cur.key(e);
 });
 document.addEventListener('keyup', (e) => { if (active && cur && cur.keyup) cur.keyup(e); });
@@ -549,76 +663,95 @@ GAMES.seq = {
 GAMES.filter = {
   init() {
     $('#stage').innerHTML = `<div class="sortkeys">
-        <button class="btn sortbtn" data-b="0" style="background:#ff9f1c"><span class="k">⬅ ou Q</span>🔥 AU FOUR<small>les portraits 🖼️</small></button>
-        <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>la ferraille 🔩⚙️🔧</small></button>
+        <button class="btn sortbtn" data-b="0" style="background:#ff9f1c"><span class="k">⬅ ou Q</span>🔥 AU FOUR<small>la ferraille 🔩⚙️🔧</small></button>
+        <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>les tableaux 🖼️</small></button>
       </div>
-      <div class="ucturn" id="fnow" style="margin:0 0 8px">Les objets arrivent…</div>
-      <div class="screen-dark"><canvas id="fc" width="820" height="300"></canvas></div>${legend()}
-      <p class="sub">Trie chaque objet quand il est dans la zone jaune. Oublier = −1.</p>`;
-    this.items = null; this.dec = new Map(); this.res = {}; this.raf = null;
+      <div class="ucturn" id="fnow" style="margin:0 0 8px">Le tapis démarre…</div>
+      <div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${progsInit()}
+      <p class="sub">Ton tapis avance à ton rythme. Erreur = sonné 1,5 s.</p>`;
+    this.items = null; this.pos = 0; this.stunUntil = 0; this.anims = []; this.slideT = 0; this.raf = null;
     $('#stage').querySelectorAll('.sortbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.sort(+b.dataset.b); }));
   },
   msg(m) {
-    if (m.k === 'belt') { this.items = m.items; this.half = m.half; this.t0 = performance.now(); this.loop(); M.players.forEach((_, i) => legendSet(i, '0 pt')); }
-    if (m.k === 'res') {
-      this.res[m.idx] = m.res[M.me];
-      SFX.play(m.res[M.me] === 1 ? 'ok' : 'bad');
-      m.s.forEach((v, i) => legendSet(i, `${v} pt${Math.abs(v) > 1 ? 's' : ''}`));
+    if (m.k === 'belt') { this.items = m.items; this.N = m.n; this.stunMs = m.stun; progsUpdate(M.players.map(() => 0)); this.status(); this.loop(); }
+    if (m.k === 'prog') {
+      progsUpdate(m.pos.map((p) => p / this.N));
+      if (m.pos[M.me] > this.pos) { this.pos = m.pos[M.me]; this.status(); }
     }
+    if (m.k === 'stun' && m.i === M.me && performance.now() > this.stunUntil) this.stunUntil = performance.now() + m.ms;
   },
   key(e) {
     if (e.repeat) return;
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); this.sort(0); }
     else if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); this.sort(1); }
   },
-  inZone() {
-    const el = performance.now() - this.t0;
-    return this.items.findIndex((it, k) => !this.dec.has(k) && Math.abs(el - it.t) <= this.half + 60);
+  status() {
+    const el = $('#fnow'); if (!el || !this.items) return;
+    el.textContent = this.pos >= this.N ? '🏁 Tout trié !' : `Objet ${this.pos + 1} / ${this.N} : ${this.items[this.pos].e} ${this.items[this.pos].n}`;
   },
   sort(b) {
-    if (!this.items || !active || dead) return;
+    if (!this.items || !active || dead || this.pos >= this.N) return;
+    const now = performance.now();
+    if (now < this.stunUntil) { shake($('#fc')); return; }
     send({ t: 'input', a: 'sort', b });
-    const k = this.inZone();
-    if (k >= 0) { this.dec.set(k, { b, at: performance.now() - this.t0 }); SFX.play(b === 0 ? 'whoosh' : 'bonk'); }
+    const it = this.items[this.pos];
+    const want = it.e === '🖼️' ? 1 : 0;
+    if (b === want) {
+      this.anims.push({ e: it.e, b, t: now });
+      this.pos++; this.slideT = now;
+      SFX.play(b === 0 ? 'whoosh' : 'bonk');
+    } else {
+      this.stunUntil = now + (this.stunMs || 1500);
+      SFX.play('bad'); shake($('#fc'));
+    }
+    this.status();
   },
   loop() {
-    const cv = $('#fc'), c = cv.getContext('2d'), W = cv.width, ZX = 520, V = 70 / this.half, BY = 165;
+    const cv = $('#fc'), c = cv.getContext('2d'), W = cv.width, ZX = 430, GAP = 120, BY = 165;
     const draw = () => {
       this.raf = requestAnimationFrame(draw);
-      const el = performance.now() - this.t0;
-      c.fillStyle = '#14102e'; c.fillRect(0, 0, W, 300);
-      // caisse (au-dessus) et four (en dessous) de la zone
+      const now = performance.now();
+      c.fillStyle = '#14102e'; c.fillRect(0, 0, W, 280);
+      // four (en bas à gauche) et caisse (en haut à droite), comme les boutons
+      const fl = c.createLinearGradient(0, 200, 0, 280); fl.addColorStop(0, '#ffd23f'); fl.addColorStop(0.5, '#ff9f1c'); fl.addColorStop(1, '#ff4d6d');
+      c.fillStyle = fl; c.fillRect(ZX - 250, 205, 150, 75);
+      for (let k = 0; k < 7; k++) { c.font = '22px serif'; c.textAlign = 'center'; c.fillText('🔥', ZX - 240 + k * 22, 276 - Math.abs(Math.sin(now / 120 + k)) * 14); }
+      strokeText(c, '⬅ FOUR (ferraille)', ZX - 175, 228, '#fff', 14);
       c.fillStyle = '#c98b4a'; c.strokeStyle = '#1b1440'; c.lineWidth = 3;
-      c.fillRect(ZX - 55, 6, 110, 52); c.strokeRect(ZX - 55, 6, 110, 52);
-      strokeText(c, '📦 CAISSE ➡', ZX, 38, '#fff', 15);
-      const fl = c.createLinearGradient(0, 205, 0, 300); fl.addColorStop(0, '#ffd23f'); fl.addColorStop(0.5, '#ff9f1c'); fl.addColorStop(1, '#ff4d6d');
-      c.fillStyle = fl; c.fillRect(ZX - 70, 205, 140, 95);
-      for (let k = 0; k < 7; k++) { c.font = '24px serif'; c.textAlign = 'center'; c.fillText('🔥', ZX - 60 + k * 20, 295 - Math.abs(Math.sin(el / 120 + k)) * 16); }
-      strokeText(c, '⬅ FOUR 🔥', ZX, 232, '#fff', 15);
-      // tapis
+      c.fillRect(ZX + 110, 14, 150, 62); c.strokeRect(ZX + 110, 14, 150, 62);
+      c.beginPath(); c.moveTo(ZX + 110, 45); c.lineTo(ZX + 260, 45); c.stroke();
+      strokeText(c, 'CAISSE (tableaux) ➡', ZX + 185, 38, '#fff', 14);
+      // tapis : glisse d'un cran à chaque tri
+      const slide = Math.max(0, 1 - (now - this.slideT) / 160);
       c.fillStyle = '#3a3166'; c.fillRect(0, BY, W, 24);
       c.fillStyle = '#58508f';
-      const off = (el * V) % 30;
+      const off = ((this.pos - slide) * GAP) % 30;
       for (let x = off - 30; x < W; x += 30) c.fillRect(x, BY + 4, 14, 16);
-      const zk = this.inZone();
-      c.strokeStyle = zk >= 0 ? '#ffd23f' : 'rgba(255,210,63,.45)'; c.lineWidth = zk >= 0 ? 5 : 3;
-      c.setLineDash([8, 6]); c.strokeRect(ZX - 70, 70, 140, 128); c.setLineDash([]);
-      this.items.forEach((it, k) => {
-        let x = ZX + (el - it.t) * V, y = BY - 10;
-        const d = this.dec.get(k);
-        if (d) {
-          const dt = el - d.at;
-          x = ZX + (d.at - it.t) * V;
-          y = d.b === 0 ? BY - 10 + dt * 0.4 : BY - 10 - dt * 0.4;
-          if (y > 300 || y < 20) { if (this.res[k] !== undefined) strokeText(c, this.res[k] === 1 ? '✔' : '✖', ZX + 90, BY - 40, this.res[k] === 1 ? '#2ee59d' : '#ff4d6d', 26); return; }
-        }
-        if (x < -60 || x > W + 60) return;
-        c.font = '46px serif'; c.textAlign = 'center'; c.fillText(it.e, x, y);
-        if (!d) strokeText(c, it.n, x, y + 34 > BY + 40 ? BY + 44 : y - 52, '#fff', 12);
-        if (!d && this.res[k] !== undefined) strokeText(c, this.res[k] === 2 ? '⏰ oublié' : this.res[k] === 1 ? '✔' : '✖', x, y - 52, this.res[k] === 1 ? '#2ee59d' : '#ff4d6d', 16);
+      c.strokeStyle = '#ffd23f'; c.lineWidth = 4; c.setLineDash([8, 6]); c.strokeRect(ZX - 55, 80, 110, 112); c.setLineDash([]);
+      for (let k = 0; k < 7; k++) {
+        const idx = this.pos + k; if (idx >= this.N) break;
+        const it = this.items[idx];
+        const x = ZX - (k - slide) * GAP;
+        if (x < -60) break;
+        c.font = k === 0 ? '58px serif' : '40px serif'; c.textAlign = 'center'; c.globalAlpha = k === 0 ? 1 : 0.75;
+        c.fillText(it.e, x, BY - 10); c.globalAlpha = 1;
+        if (k === 0) strokeText(c, it.n, x, BY + 46, '#fff', 14);
+      }
+      // objets triés qui partent vers le four ou la caisse
+      this.anims = this.anims.filter((a) => now - a.t < 380);
+      this.anims.forEach((a) => {
+        const k = (now - a.t) / 380;
+        const tx = a.b === 0 ? ZX - 175 : ZX + 185, ty = a.b === 0 ? 250 : 50;
+        c.globalAlpha = 1 - k * 0.6; c.font = '48px serif'; c.textAlign = 'center';
+        c.fillText(a.e, lerp(ZX, tx, k), lerp(BY - 10, ty, k) - Math.sin(k * Math.PI) * 50); c.globalAlpha = 1;
       });
-      const fnow = $('#fnow');
-      if (fnow) fnow.textContent = zk >= 0 ? `Dans la zone : ${this.items[zk].e} ${this.items[zk].n} → ${this.items[zk].e === '🖼️' ? '⬅ FOUR' : '➡ CAISSE'} ?` : ' ';
+      if (this.pos >= this.N) strokeText(c, '🏁 FINI !', ZX, 130, '#2ee59d', 30);
+      if (now < this.stunUntil) {
+        c.fillStyle = 'rgba(20,16,46,.55)'; c.fillRect(0, 0, W, 280);
+        strokeText(c, '💫 SONNÉ 💫', ZX, 120, '#ffd23f', 34);
+        const left = (this.stunUntil - now) / (this.stunMs || 1500);
+        c.fillStyle = '#ff4d6d'; c.fillRect(ZX - 100, 140, 200 * left, 10);
+      }
     };
     draw();
   },
@@ -724,34 +857,148 @@ GAMES.smoke = {
 // ── Bonnes manières ──
 GAMES.manners = {
   init() {
-    $('#stage').innerHTML = `<div id="tonton" style="text-align:center;font-size:90px;line-height:1;height:110px;position:relative"><span id="tface">🧔‍♂️</span><span id="paper" style="position:absolute;left:50%;top:6px;transform:translateX(-50%);font-size:96px">📰</span></div>
-      <div class="ucturn" id="mst">Tonton Gérard lit son journal…</div>
-      <div class="uclist" id="plates"></div><p class="sub">Maintiens ESPACE pour manger · relâche quand il regarde</p>`;
+    $('#stage').innerHTML = `<div class="screen-dark" style="background:#2b1d14"><canvas id="mnc" width="820" height="470"></canvas></div>
+      <div class="ucturn" id="mst">Tonton Gérard lit son journal…</div><p class="sub">Maintiens ESPACE pour manger · relâche quand il baisse le journal</p>`;
     if (isTouch) $('#stage').appendChild(holdBtn('🍴 MANGER', () => this.down(), () => this.up()));
-    this.eating = false; this.al = M.players.map(() => true);
-  },
-  plates(m) {
-    $('#plates').innerHTML = M.players.map((p, i) => `<div class="ucp ${!m.al[i] ? 'out' : ''}">${pill(i)}
-      <div class="bar"><div style="width:${m.pr[i]}%;background:${p.color}"></div></div><span style="font-size:24px">${!m.al[i] ? '⚰️' : m.pr[i] >= 100 ? '🏁' : m.e[i] ? '😋' : '🍝'}</span></div>`).join('');
+    const n = M.players.length;
+    this.eating = false; this.ph = 'read'; this.phT = performance.now();
+    this.pr = new Array(n).fill(0); this.e = new Array(n).fill(false); this.al = new Array(n).fill(true);
+    this.bangT = 0; this.bangI = -1; this.raf = null;
+    this.loop();
   },
   msg(m) {
-    if (m.k === 'table') this.plates({ pr: M.players.map(() => 0), e: [], al: this.al });
     if (m.k === 'ph') {
-      const paper = $('#paper'), st = $('#mst');
-      paper.getAnimations().forEach((x) => x.cancel());
-      $('#tonton').style.filter = '';
-      if (m.ph === 'read') { paper.style.display = ''; $('#tface').textContent = '🧔‍♂️'; st.textContent = 'Tonton Gérard lit son journal… mange !'; }
-      if (m.ph === 'rustle') { paper.animate([{ transform: 'translateX(-50%) rotate(-6deg)' }, { transform: 'translateX(-50%) rotate(6deg)' }], { duration: 90, iterations: 20, direction: 'alternate' }); st.textContent = '*froisse froisse*'; SFX.play('gas'); }
-      if (m.ph === 'look') { paper.style.display = 'none'; $('#tface').textContent = '😠🔫'; $('#tonton').style.filter = 'drop-shadow(0 0 12px #ff4d6d)'; st.textContent = '👀 IL REGARDE. NE BOUGE PLUS.'; }
+      this.ph = m.ph; this.phT = performance.now();
+      const st = $('#mst');
+      if (m.ph === 'read') st.textContent = 'Tonton Gérard lit son journal… mange !';
+      if (m.ph === 'rustle') { st.textContent = '📰 *froisse froisse*… il va regarder !'; SFX.play('gas'); }
+      if (m.ph === 'look') st.textContent = '👀 IL REGARDE. NE BOUGE PLUS.';
     }
-    if (m.k === 'bang') { SFX.play('gun'); shake($('#tonton')); }
-    if (m.k === 's') this.plates(m);
+    if (m.k === 'bang') { this.bangT = performance.now(); this.bangI = m.i; SFX.play('gun'); }
+    if (m.k === 's') { this.pr = m.pr; this.e = m.e; this.al = m.al; }
   },
   key(e) { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) this.down(); } },
   keyup(e) { if (e.code === 'Space') this.up(); },
   blur() { this.up(); },
   down() { if (!this.eating) { this.eating = true; send({ t: 'input', a: 'eat' }); } },
   up() { if (this.eating) { this.eating = false; send({ t: 'input', a: 'stop' }); } },
+  loop() {
+    const cv = $('#mnc'), c = cv.getContext('2d'), W = 820, H = 470, CX = 410;
+    const draw = () => {
+      this.raf = requestAnimationFrame(draw);
+      const now = performance.now(), t = now / 1000, ph = this.ph;
+      // ── la salle à manger ──
+      c.fillStyle = '#e9dcc0'; c.fillRect(0, 0, W, H);
+      c.fillStyle = '#dccaa2'; for (let x = 0; x < W; x += 44) c.fillRect(x, 0, 18, 300);
+      c.fillStyle = '#7a4b2a'; c.fillRect(0, 280, W, H - 280);
+      c.fillStyle = '#5e381f'; c.fillRect(0, 280, W, 8);
+      // tableau de cerf + horloge
+      c.fillStyle = '#5e381f'; c.fillRect(60, 40, 120, 90); c.fillStyle = '#c9b48a'; c.fillRect(70, 50, 100, 70);
+      c.font = '44px serif'; c.textAlign = 'center'; c.fillText('🦌', 120, 102);
+      c.font = '46px serif'; c.fillText('🕰️', 720, 100);
+      // lustre qui se balance
+      const sw = Math.sin(t * 1.3) * 0.06;
+      c.save(); c.translate(CX, 0); c.rotate(sw);
+      c.strokeStyle = '#3a2a1a'; c.lineWidth = 3; c.beginPath(); c.moveTo(0, 0); c.lineTo(0, 34); c.stroke();
+      c.fillStyle = '#c99a2e'; c.beginPath(); c.moveTo(-30, 52); c.lineTo(30, 52); c.lineTo(14, 34); c.lineTo(-14, 34); c.closePath(); c.fill();
+      c.fillStyle = 'rgba(255,230,140,.35)'; c.beginPath(); c.moveTo(-30, 52); c.lineTo(30, 52); c.lineTo(90, 200); c.lineTo(-90, 200); c.closePath(); c.fill();
+      c.restore();
+      // ── Tonton Gérard ──
+      c.fillStyle = '#3d2b1f'; c.beginPath(); c.ellipse(CX, 285, 95, 85, 0, Math.PI, 0); c.fill();             // costume
+      c.fillStyle = '#fff'; c.beginPath(); c.moveTo(CX - 26, 205); c.lineTo(CX + 26, 205); c.lineTo(CX, 270); c.closePath(); c.fill(); // chemise
+      c.fillStyle = '#b3122e'; c.beginPath(); c.moveTo(CX - 7, 210); c.lineTo(CX + 7, 210); c.lineTo(CX + 9, 262); c.lineTo(CX, 274); c.lineTo(CX - 9, 262); c.closePath(); c.fill(); // cravate
+      const head = () => {
+        c.fillStyle = '#f1c27d'; c.beginPath(); c.arc(CX, 160, 42, 0, 7); c.fill(); c.strokeStyle = '#1b1440'; c.lineWidth = 3; c.stroke();
+        c.fillStyle = '#6b6b6b'; c.beginPath(); c.arc(CX, 140, 42, Math.PI * 1.08, Math.PI * 1.92); c.lineTo(CX + 30, 128); c.lineTo(CX - 30, 128); c.fill(); // cheveux gris
+      };
+      if (ph === 'look') {
+        head();
+        // regard qui tue
+        const glow = 0.6 + 0.4 * Math.sin(now / 80);
+        c.fillStyle = `rgba(255,30,60,${glow})`; c.beginPath(); c.arc(CX - 15, 156, 7, 0, 7); c.arc(CX + 15, 156, 7, 0, 7); c.fill();
+        c.strokeStyle = '#1b1440'; c.lineWidth = 5;
+        c.beginPath(); c.moveTo(CX - 28, 140); c.lineTo(CX - 6, 149); c.moveTo(CX + 28, 140); c.lineTo(CX + 6, 149); c.stroke(); // sourcils froncés
+        c.fillStyle = '#4a3020'; c.beginPath(); c.ellipse(CX - 13, 177, 16, 7, 0.25, 0, 7); c.ellipse(CX + 13, 177, 16, 7, -0.25, 0, 7); c.fill(); // moustache
+        c.strokeStyle = '#1b1440'; c.lineWidth = 3; c.beginPath(); c.arc(CX, 196, 10, Math.PI * 1.15, Math.PI * 1.85); c.stroke();
+        // fusil braqué sur toi
+        c.fillStyle = '#5e381f'; c.fillRect(CX - 40, 222, 80, 26);
+        c.fillStyle = '#2b2b33'; c.beginPath(); c.arc(CX - 17, 232, 19, 0, 7); c.arc(CX + 17, 232, 19, 0, 7); c.fill();
+        c.fillStyle = '#000'; c.beginPath(); c.arc(CX - 17, 232, 11, 0, 7); c.arc(CX + 17, 232, 11, 0, 7); c.fill();
+        c.fillStyle = '#f1c27d'; c.beginPath(); c.arc(CX - 58, 238, 14, 0, 7); c.arc(CX + 58, 238, 14, 0, 7); c.fill();
+        // journal posé
+        c.save(); c.translate(CX + 165, 300); c.rotate(-0.15); c.fillStyle = '#f4f1e8'; c.fillRect(-45, -20, 90, 40); c.restore();
+      } else {
+        // la tête dépasse un peu quand il froisse le journal
+        if (ph === 'rustle') {
+          head();
+          c.fillStyle = '#1b1440'; c.beginPath(); c.arc(CX - 14, 158, 4, 0, 7); c.arc(CX + 14, 158, 4, 0, 7); c.fill();
+        }
+        const shakeA = ph === 'rustle' ? Math.sin(now / 35) * 0.05 : Math.sin(t * 0.8) * 0.01;
+        const py = ph === 'rustle' ? 184 : 98;
+        c.save(); c.translate(CX, py + 80); c.rotate(shakeA);
+        c.fillStyle = '#f4f1e8'; c.strokeStyle = '#1b1440'; c.lineWidth = 3;
+        c.fillRect(-125, -80, 250, 160); c.strokeRect(-125, -80, 250, 160);
+        c.beginPath(); c.moveTo(0, -80); c.lineTo(0, 80); c.stroke();
+        c.fillStyle = '#1b1440'; c.font = '900 22px Georgia, serif'; c.textAlign = 'center'; c.fillText('LE TONTON', -62, -52);
+        c.font = '900 13px Georgia, serif'; c.fillText('LIBÉRÉ', -62, -34);
+        c.fillStyle = '#9a96a8'; for (let k = 0; k < 6; k++) { c.fillRect(-112, -20 + k * 14, 96, 6); c.fillRect(14, -66 + k * 14, 96, 6); }
+        c.fillStyle = '#c9c4d6'; c.fillRect(20, 22, 90, 46);
+        c.font = '30px serif'; c.fillText('🍷', 65, 56);
+        c.fillStyle = '#f1c27d'; c.beginPath(); c.arc(-125, 18, 14, 0, 7); c.arc(125, 18, 14, 0, 7); c.fill();
+        c.restore();
+        if (ph === 'rustle') strokeText(c, '*froisse froisse*', CX + 180, 120, '#ff9f1c', 18);
+      }
+      // ── la table ──
+      c.save();
+      c.beginPath(); c.moveTo(110, 300); c.lineTo(710, 300); c.lineTo(810, 430); c.lineTo(10, 430); c.closePath(); c.clip();
+      c.fillStyle = '#fff'; c.fillRect(0, 300, W, 130);
+      c.fillStyle = 'rgba(214,40,57,.85)';
+      for (let y = 300; y < 430; y += 26) for (let x = 0; x < W; x += 52) c.fillRect(x + ((y / 26) % 2) * 26, y, 26, 26);
+      c.restore();
+      c.fillStyle = '#5e381f'; c.fillRect(10, 430, 800, 14);
+      // ── les convives ──
+      const n = M.players.length;
+      for (let i = 0; i < n; i++) {
+        const x = 90 + (i + 0.5) * (640 / n), py = 372;
+        const alive = this.al[i], pr = this.pr[i] || 0, eating = alive && this.e[i] && ph !== 'look';
+        if (!alive) {
+          c.fillStyle = 'rgba(140,0,20,.85)';
+          [[-30, -6, 18], [22, 8, 14], [-6, 20, 22], [36, -14, 9]].forEach(([dx, dy, r]) => { c.beginPath(); c.arc(x + dx, py + dy, r, 0, 7); c.fill(); });
+        }
+        // assiette + spaghettis qui diminuent
+        c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5;
+        c.beginPath(); c.ellipse(x, py, 44, 20, 0, 0, 7); c.fill(); c.stroke();
+        const left = Math.max(0, 1 - pr / 100);
+        if (left > 0) {
+          c.strokeStyle = '#e8b830'; c.lineWidth = 3;
+          for (let k = 0; k < 8 * left + 1; k++) { c.beginPath(); c.ellipse(x + Math.sin(k * 2.1) * 12 * left, py - 3, 24 * left + 4, 9 * left + 2, k * 0.7, 0, 7); c.stroke(); }
+          c.fillStyle = '#c0392b'; c.beginPath(); c.arc(x, py - 6, 9 * left + 2, 0, 7); c.fill();
+        }
+        // la tête du convive (vue de dos) et sa fourchette
+        const bob = eating ? Math.sin(now / 70) * 5 : 0;
+        c.font = '46px serif'; c.textAlign = 'center';
+        c.fillText(alive ? P(i).avatar : '💀', x, 462 + bob);
+        if (eating) { c.font = '26px serif'; c.fillText('🍴', x + 26, py - 4 - Math.abs(Math.sin(now / 90)) * 30); }
+        if (pr >= 100 && alive) strokeText(c, '🏁 FINI', x, py - 34, '#2ee59d', 16);
+        strokeText(c, P(i).name + (i === M.me ? ' (toi)' : ''), x, 300 + 22 - 6, P(i).color, 13);
+        c.fillStyle = '#1b1440'; c.fillRect(x - 32, py + 26, 64, 7);
+        c.fillStyle = P(i).color; c.fillRect(x - 31, py + 27, 62 * Math.min(1, pr / 100), 5);
+      }
+      // ── coup de feu ──
+      const sinceBang = now - this.bangT;
+      if (sinceBang < 260) {
+        c.fillStyle = `rgba(255,255,255,${0.8 * (1 - sinceBang / 260)})`; c.fillRect(0, 0, W, H);
+        c.font = '70px serif'; c.textAlign = 'center'; c.fillText('💥', CX, 250);
+      }
+      if (ph === 'look') {
+        const a = 0.18 + 0.1 * Math.sin(now / 90);
+        const g = c.createRadialGradient(CX, H / 2, 150, CX, H / 2, 520); g.addColorStop(0, 'rgba(255,0,40,0)'); g.addColorStop(1, `rgba(255,0,40,${a + 0.25})`);
+        c.fillStyle = g; c.fillRect(0, 0, W, H);
+      }
+    };
+    draw();
+  },
+  stop() { cancelAnimationFrame(this.raf); },
 };
 
 // ── L'Araignée ──
@@ -1243,6 +1490,7 @@ $('#btnMute').textContent = SFX.muted ? '🔇' : '🔊';
 $('#btnMute').onclick = () => { $('#btnMute').textContent = SFX.toggle() ? '🔇' : '🔊'; };
 
 function getName() {
+  if (me) { SFX.unlock(); return me.name; }
   const n = $('#name').value.trim();
   if (!n) { $('#homeErr').textContent = 'Choisis un pseudo 😉'; $('#name').focus(); shake($('#name')); return null; }
   try { localStorage.setItem('clutch-name', n); } catch {}
@@ -1252,14 +1500,14 @@ function getName() {
 $('#btnCreate').onclick = () => {
   const name = getName(); if (!name) return;
   $('#homeErr').textContent = '';
-  connect(() => send({ t: 'create', name, avatar: myAvatar }));
+  send({ t: 'create', name, avatar: myAvatar });
 };
 $('#btnJoin').onclick = () => {
   const name = getName(); if (!name) return;
   const code = $('#code').value.trim().toUpperCase();
   if (code.length !== 4) { $('#homeErr').textContent = 'Le code fait 4 lettres.'; return; }
   $('#homeErr').textContent = '';
-  connect(() => send({ t: 'join', code, name, avatar: myAvatar }));
+  send({ t: 'join', code, name, avatar: myAvatar });
 };
 $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnJoin').click(); });
 $('#name').addEventListener('keydown', (e) => { if (e.key === 'Enter') ($('#code').value.trim() ? $('#btnJoin') : $('#btnCreate')).click(); });
@@ -1268,7 +1516,18 @@ const isHost = () => room && room.you === room.host;
 $('#modes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b && isHost()) send({ t: 'cfg', mode: b.dataset.mode }); });
 $('#rounds').addEventListener('click', (e) => { const b = e.target.closest('[data-r]'); if (b && isHost()) send({ t: 'cfg', rounds: +b.dataset.r }); });
 $('#gamesList').addEventListener('click', (e) => { const b = e.target.closest('[data-game]'); if (b && isHost()) send({ t: 'cfg', game: b.dataset.game }); });
-$('#teams').addEventListener('click', (e) => { const b = e.target.closest('[data-team]'); if (b) send({ t: 'team', team: +b.dataset.team }); });
+$('#teams').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-team]'); if (b) send({ t: 'team', team: +b.dataset.team });
+  const f = e.target.closest('[data-addfriend]'); if (f) { send({ t: 'friendAdd', name: f.dataset.addfriend }); f.remove(); toast('✉️ Demande d\'ami envoyée'); }
+});
+$('#btnLeave').onclick = leaveToMenu;
+$('#btnMenu').onclick = backToMenu;
+let CATALOG = [];
+$('#btnGames').onclick = () => {
+  $('#gmBody').innerHTML = CATALOG.map((g) => `<div class="gmrow"><span class="i">${g.icon}</span><div><b>${esc(g.title)}</b><small>${esc(g.desc)}</small><p>${esc(g.rules)}</p></div></div>`).join('') || '<p class="mut">Connexion au serveur…</p>';
+  $('#gamesModal').classList.remove('hidden');
+};
+$('#gamesModal').addEventListener('click', (e) => { if (e.target.id === 'gamesModal' || e.target.closest('#gmClose')) $('#gamesModal').classList.add('hidden'); });
 $('#btnStart').onclick = () => { SFX.unlock(); send({ t: 'start' }); };
 $('#btnCopy').onclick = async () => {
   const link = location.origin + '/?code=' + room.code;
@@ -1277,3 +1536,6 @@ $('#btnCopy').onclick = async () => {
   setTimeout(() => { $('#btnCopy').textContent = "📋 Copier le lien d'invitation"; }, 2000);
 };
 document.addEventListener('pointerdown', () => SFX.unlock(), { once: true });
+// au chargement : si on revient d'un refresh en pleine partie, on attend la reprise avant d'afficher l'accueil
+if (store.get('clutch-resume', true)) { show('lobby'); $('#netbar').classList.remove('hidden'); }
+connect();

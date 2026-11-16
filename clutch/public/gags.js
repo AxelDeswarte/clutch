@@ -3,7 +3,7 @@
 
 // ════════════════════════ SONS ════════════════════════
 const SFX = (() => {
-  let ctx = null, muted = false;
+  let ctx = null, muted = false, hushed = false;
   try { muted = localStorage.getItem('clutch-mute') === '1'; } catch {}
   function ac() {
     if (!ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; ctx = new C(); }
@@ -84,7 +84,8 @@ const SFX = (() => {
     ok() { osc('sine', 880, 1320, 0.08, 0.14); },
   };
   return {
-    play(n) { try { (S[n] || S.boom)(); } catch {} },
+    play(n) { if (hushed) return; try { (S[n] || S.boom)(); } catch {} },
+    hush(v) { hushed = !!v; },
     unlock() { ac(); },
     get muted() { return muted; },
     toggle() { muted = !muted; try { localStorage.setItem('clutch-mute', muted ? '1' : '0'); } catch {} return muted; },

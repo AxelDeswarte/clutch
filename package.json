@@ -1,7 +1,7 @@
 {
   "name": "clutch",
   "version": "1.0.0",
-  "description": "Duels de mini-jeux 1v1 en ligne — premier à 3",
+  "description": "Mini-jeux comp\u00e9titifs en ligne entre potes",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,6 +10,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "pg": "^8.13.0"
   }
 }

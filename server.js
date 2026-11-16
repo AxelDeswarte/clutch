@@ -1,14 +1,19 @@
-// CLUTCH — serveur (HTTP statique + WebSocket + salons)
+// CLUTCH — serveur (HTTP statique + WebSocket + salons + comptes)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { GAMES, shuffle, ri } = require('./games');
+const store = require('./store');
+const ACC = require('./accounts');
+const C = require('./public/cosmetics');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC = path.join(__dirname, 'public');
 const MAX_MEMBERS = 6;
+const GRACE_MS = 45000; // temps laissé pour revenir après un refresh / une coupure
 
 const MODES = {
   duel: { label: '1v1', min: 2, max: 2 },
@@ -19,27 +24,78 @@ const MODES = {
 const MAX_ROUNDS = 25;
 const PALETTE = ['#3dd6ff', '#ff5fa2', '#ffd23f', '#2ee59d', '#ff9f1c', '#b388ff'];
 const TEAM_PAL = [['#3dd6ff', '#5b8cff', '#2ee5c9'], ['#ff5fa2', '#ff4d6d', '#ff9f1c']];
-const cleanAvatar = (a) => { const s = String(a || '').trim(); return s && [...s].length <= 4 && s.length <= 12 ? s : '😎'; };
 const TEAM_NAMES = ['Équipe Bleue', 'Équipe Rose'];
 const GAME_KEYS = Object.keys(GAMES);
+// règles de tous les jeux pour la page « Les mini-jeux » du menu
+const CATALOG = GAME_KEYS.map((k) => {
+  const g = GAMES[k];
+  const rules = typeof g.rules === 'function' ? `${g.rules(3)} — En 1v1 : ${g.rules(2)}` : g.rules;
+  return { key: k, title: g.title, icon: g.icon, desc: g.desc, rules };
+});
 
-const sendWs = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
+const sendWs = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
 const ranksFromScores = (sc) => sc.map((s) => 1 + sc.filter((o) => o > s).length);
+const guestAvatar = (a) => (C.BASE_AVATARS.includes(a) ? a : C.BASE_AVATARS[0]);
 
 const rooms = new Map();
+const online = new Map(); // userId -> Set(session)
 let nextMemberId = 1;
 
+// ═════════════════ présence & amis ═════════════════
+function statusOf(uid) {
+  const set = online.get(uid);
+  if (!set || !set.size) return { status: 'offline' };
+  let st = { status: 'online' };
+  for (const S of set) {
+    if (S.room && S.member && !S.member.offline) {
+      st = S.room.state === 'lobby'
+        ? { status: 'lobby', code: S.room.code, joinable: S.room.members.length < MAX_MEMBERS }
+        : { status: 'game', code: S.room.code };
+    }
+  }
+  return st;
+}
+function friendsPayload(u) {
+  const prof = (id) => { const v = store.get(id); return v ? ACC.publicProfile(v) : null; };
+  return {
+    t: 'friends',
+    friends: u.friends.map((id) => { const p = prof(id); return p && { ...p, ...statusOf(id) }; }).filter(Boolean),
+    reqIn: u.reqIn.map(prof).filter(Boolean),
+    reqOut: u.reqOut.map(prof).filter(Boolean),
+  };
+}
+function pushFriends(uid) {
+  const u = store.get(uid), set = online.get(uid);
+  if (!u || !set) return;
+  const p = friendsPayload(u);
+  set.forEach((S) => sendWs(S.ws, p));
+}
+function pushMe(uid) {
+  const u = store.get(uid), set = online.get(uid);
+  if (!u || !set) return;
+  set.forEach((S) => sendWs(S.ws, { t: 'me', me: ACC.meProfile(u) }));
+}
+function presenceChanged(uid) {
+  if (!uid) return;
+  const u = store.get(uid);
+  if (!u) return;
+  pushFriends(uid);
+  u.friends.forEach(pushFriends);
+}
+
+// ═════════════════ salons ═════════════════
 class Room {
   constructor(code) {
     this.code = code;
-    this.members = [];          // { id, ws, name, team }
+    this.members = [];
     this.hostId = null;
     this.mode = 'duel';
     this.rounds = 5;
     this.enabled = new Set(GAME_KEYS);
-    this.state = 'lobby';       // lobby | intro | round | between
+    this.state = 'lobby'; // lobby | intro | round | between
     this.timers = new Set();
     this.lastResult = '';
+    this.roundLog = [];
   }
 
   // ---------- API utilisée par les mini-jeux ----------
@@ -48,12 +104,22 @@ class Room {
   name(i) { return this.p[i] ? this.p[i].name : '?'; }
   send(msg, only) {
     if (msg.t === 'g' && this.state !== 'round') return; // rien après la fin d'une manche
+    if (this.state === 'round' && (msg.t === 'g' || msg.t === 'elim')) this.logMsg(msg, only);
     const s = JSON.stringify(msg);
     if (this.state === 'lobby' || !this.p) {
-      this.members.forEach((m) => { if (m.ws.readyState === 1) m.ws.send(s); });
+      this.members.forEach((m) => { if (m.ws && m.ws.readyState === 1) m.ws.send(s); });
       return;
     }
-    this.p.forEach((m, i) => { if ((only === undefined || only === i) && m.ws.readyState === 1) m.ws.send(s); });
+    this.p.forEach((m, i) => { if ((only === undefined || only === i) && m.ws && m.ws.readyState === 1) m.ws.send(s); });
+  }
+  // journal de la manche, rejoué à un joueur qui revient après un refresh
+  logMsg(msg, only) {
+    if (msg.t === 'g' && msg.k === 's') {
+      const k = this.roundLog.findIndex((e) => e.msg.k === 's' && e.only === only);
+      if (k >= 0) this.roundLog.splice(k, 1);
+    }
+    this.roundLog.push({ msg, only });
+    if (this.roundLog.length > 8000) this.roundLog.shift();
   }
   later(fn, ms) {
     const id = setTimeout(() => { this.timers.delete(id); fn(); }, ms);
@@ -79,6 +145,7 @@ class Room {
   // ---------- salon ----------
   isHost(id) { return this.hostId === id; }
   teamCount(t) { return this.members.filter((m) => m.team === t).length; }
+  presence() { this.members.forEach((m) => presenceChanged(m.uid)); }
 
   startCheck() {
     const m = MODES[this.mode];
@@ -88,6 +155,7 @@ class Room {
     if (m.teamSize && (this.teamCount(0) !== m.teamSize || this.teamCount(1) !== m.teamSize)) {
       return { ok: false, hint: `Équipes déséquilibrées : il faut ${m.teamSize} joueurs par équipe.` };
     }
+    if (this.members.some((x) => x.offline)) return { ok: false, hint: "Un joueur s'est déconnecté, on l'attend…" };
     const playable = [...this.enabled].filter((k) => GAMES[k].min <= c);
     if (!playable.length) return { ok: false, hint: 'Aucun mini-jeu activé jouable avec ce nombre de joueurs.' };
     return { ok: true, hint: '' };
@@ -95,33 +163,73 @@ class Room {
 
   broadcastRoom() {
     const chk = this.startCheck();
+    const members = this.members.map((x) => ({ id: x.id, uid: x.uid, name: x.name, team: x.team, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, offline: !!x.offline }));
     this.members.forEach((m) => sendWs(m.ws, {
-      t: 'room', code: this.code, you: m.id, host: this.hostId,
+      t: 'room', code: this.code, you: m.id, key: m.key, host: this.hostId,
       mode: this.mode, rounds: this.rounds,
       modes: Object.entries(MODES).map(([k, v]) => ({ key: k, label: v.label, min: v.min, max: v.max })),
-      members: this.members.map((x) => ({ id: x.id, name: x.name, team: x.team, avatar: x.avatar })),
+      members,
       games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k) })),
       canStart: chk.ok, hint: chk.hint, inMatch: this.state !== 'lobby', lastResult: this.lastResult,
     }));
   }
 
-  join(ws, name, avatar) {
+  join(S, guest) {
     const t0 = this.teamCount(0), t1 = this.teamCount(1);
-    const member = { id: nextMemberId++, ws, name, avatar: cleanAvatar(avatar), team: t0 <= t1 ? 0 : 1 };
+    const u = S.user;
+    const member = {
+      id: nextMemberId++, key: crypto.randomBytes(12).toString('hex'), ws: S.ws, team: t0 <= t1 ? 0 : 1, offline: false,
+      uid: u ? u.id : null,
+      name: u ? u.name : guest.name,
+      avatar: u ? u.avatar : guestAvatar(guest.avatar),
+      frame: u ? u.frame : 'classic',
+      title: u ? u.title : '',
+      level: u ? ACC.level(u) : 0,
+    };
     this.members.push(member);
     if (!this.hostId) this.hostId = member.id;
     this.broadcastRoom();
+    presenceChanged(member.uid);
     return member;
   }
 
   leave(member) {
+    clearTimeout(member.dropTimer);
+    if (!this.members.includes(member)) return;
     this.members = this.members.filter((m) => m !== member);
+    presenceChanged(member.uid);
     if (this.members.length === 0) { this.clearTimers(); rooms.delete(this.code); return; }
-    if (this.hostId === member.id) this.hostId = this.members[0].id;
+    if (this.hostId === member.id) this.hostId = (this.members.find((m) => !m.offline) || this.members[0]).id;
     if (this.state !== 'lobby' && this.p && this.p.includes(member)) {
       this.abort(`${member.name} a quitté la partie.`);
     } else {
       this.broadcastRoom();
+    }
+  }
+
+  // coupure (refresh, réseau) : on garde la place GRACE_MS, la partie continue
+  disconnect(member) {
+    member.ws = null;
+    member.offline = true;
+    member.dropTimer = setTimeout(() => { if (member.offline) this.leave(member); }, GRACE_MS);
+    this.broadcastRoom();
+    presenceChanged(member.uid);
+    this.checkLaunch();
+  }
+
+  resume(member, ws) {
+    clearTimeout(member.dropTimer);
+    member.ws = ws;
+    member.offline = false;
+    this.broadcastRoom();
+    presenceChanged(member.uid);
+    if (this.p && this.p.includes(member) && this.state !== 'lobby') {
+      const i = this.p.indexOf(member);
+      sendWs(ws, {
+        t: 'resync', match: { ...this.matchInfo, me: i }, scores: this.scores, round: this.round, state: this.state,
+        intro: this.lastIntro, ready: this.readyList(), launching: !!this.launching,
+        log: this.state === 'round' ? this.roundLog.filter((e) => e.only === undefined || e.only === i).map((e) => e.msg) : [],
+      });
     }
   }
 
@@ -133,6 +241,7 @@ class Room {
     this.lastResult = '';
     this.members.forEach((m) => sendWs(m.ws, { t: 'aborted', msg }));
     this.broadcastRoom();
+    this.presence();
   }
 
   // ---------- match ----------
@@ -140,7 +249,6 @@ class Room {
     const mode = MODES[this.mode];
     const teams = !!mode.teamSize;
     this.p = teams ? [...this.members].sort((a, b) => a.team - b.team) : [...this.members];
-    const n = this.p.length;
     if (this.mode === 'ffa') this.sides = this.p.map((_, i) => [i]);
     else if (teams) this.sides = [0, 1].map((t) => this.p.map((m, i) => (m.team === t ? i : -1)).filter((i) => i >= 0));
     else this.sides = [[0], [1]];
@@ -148,7 +256,7 @@ class Room {
     this.sides.forEach((s, si) => s.forEach((i) => { this.sideOf[i] = si; }));
     this.isFfa = this.mode === 'ffa';
     this.maxRounds = this.rounds;
-    this.perRound = this.isFfa ? 3 : 1; // points max gagnables par camp et par manche
+    this.perRound = this.isFfa ? 3 : 1;
     this.scores = new Array(this.sides.length).fill(0);
     this.queue = [];
     this.round = 0;
@@ -156,11 +264,13 @@ class Room {
     this.lastResult = '';
     const colors = this.p.map((m, i) => (teams ? TEAM_PAL[m.team][this.sides[m.team].indexOf(i)] : PALETTE[i]));
     const sideNames = teams ? TEAM_NAMES : this.p.map((m) => m.name);
-    this.p.forEach((m, i) => sendWs(m.ws, {
-      t: 'matchStart', me: i, mode: this.mode, teams, maxRounds: this.maxRounds, sides: this.sides, sideNames,
-      players: this.p.map((x, j) => ({ name: x.name, avatar: x.avatar, color: colors[j], side: this.sideOf[j] })),
-    }));
+    this.matchInfo = {
+      t: 'matchStart', mode: this.mode, teams, maxRounds: this.maxRounds, sides: this.sides, sideNames,
+      players: this.p.map((x, j) => ({ name: x.name, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, color: colors[j], side: this.sideOf[j] })),
+    };
+    this.p.forEach((m, i) => sendWs(m.ws, { ...this.matchInfo, me: i }));
     this.state = 'between';
+    this.presence();
     this.nextRound();
   }
 
@@ -175,17 +285,21 @@ class Room {
     this.gameKey = key;
     this.round++;
     this.state = 'intro';
+    this.roundLog = [];
     this.game = def.create(this);
     const decisive = this.round > this.maxRounds;
-    // Chacun lit les règles et clique « Prêt » ; la manche part quand tout le monde l'est
-    // (filet de sécurité : départ forcé au bout de 90 s pour ne pas bloquer sur un AFK).
+    // Chacun lit les règles et clique « Prêt » ; départ forcé au bout de 90 s (AFK)
     this.roundReady = new Set();
     this.launching = false;
-    this.send({ t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules, round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores, ready: this.readyList() });
+    this.lastIntro = {
+      t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules,
+      round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores,
+    };
+    this.send({ ...this.lastIntro, ready: this.readyList() });
     this.introTimer = this.later(() => this.launch(), 90000);
   }
 
-  readyList() { return this.p.map((_, i) => this.roundReady.has(i)); }
+  readyList() { return this.p ? this.p.map((_, i) => this.roundReady.has(i)) : []; }
 
   setRoundReady(member) {
     if (this.state !== 'intro' || this.launching || !this.p) return;
@@ -193,7 +307,14 @@ class Room {
     if (i < 0) return;
     this.roundReady.add(i);
     this.send({ t: 'readyState', ready: this.readyList() });
-    if (this.roundReady.size === this.n) this.launch();
+    this.checkLaunch();
+  }
+
+  // on démarre quand tous les joueurs connectés sont prêts
+  checkLaunch() {
+    if (this.state !== 'intro' || this.launching || !this.p) return;
+    const present = this.p.map((m, i) => i).filter((i) => !this.p[i].offline);
+    if (present.length && present.every((i) => this.roundReady.has(i))) this.launch();
   }
 
   launch() {
@@ -223,13 +344,11 @@ class Room {
     let winSide = -1;
 
     if (this.isFfa) {
-      // 3 / 2 / 1 points pour le podium — jamais de point pour le dernier
       ranks.forEach((r, i) => { if (r < worst || worst === 1) gained[this.sideOf[i]] += r === 1 ? 3 : r === 2 ? 2 : r === 3 ? 1 : 0; });
-      if (worst === 1) gained.fill(0); // tout le monde à égalité : personne ne marque
+      if (worst === 1) gained.fill(0);
       const firsts = ranks.map((r, i) => (r === 1 ? i : -1)).filter((i) => i >= 0);
       winSide = firsts.length === 1 ? this.sideOf[firsts[0]] : -1;
     } else {
-      // le camp du (des) meilleur(s) gagne ; si les deux camps ont un 1er, on compare la somme des places
       const firstSides = new Set(ranks.map((r, i) => (r === 1 ? this.sideOf[i] : -1)).filter((s) => s >= 0));
       if (firstSides.size === 1) winSide = [...firstSides][0];
       else {
@@ -247,8 +366,6 @@ class Room {
       r: Math.random(), o: losers.length ? this.otherThan(losers[0]) : 0,
     });
 
-    // Fin : toutes les manches jouées avec un leader unique, ou avance impossible à remonter.
-    // Égalité en tête après la dernière manche → manche décisive.
     const best = Math.max(...this.scores);
     const sorted = [...this.scores].sort((a, b) => b - a);
     const lead = sorted[0] - sorted[1];
@@ -260,11 +377,27 @@ class Room {
       const low = Math.min(...this.scores);
       const losersM = this.scores.map((s, i) => (s === low && s < best ? i : -1)).filter((i) => i >= 0);
       this.send({ t: 'matchEnd', scores: this.scores, winners, losers: losersM, r: Math.random() });
+      // XP pour les joueurs connectés à un compte
+      this.p.forEach((m, i) => {
+        if (!m.uid) return sendWs(m.ws, { t: 'xp', guest: true });
+        const u = store.get(m.uid);
+        if (!u) return;
+        const side = this.sideOf[i];
+        const res = ACC.awardMatch(u, {
+          won: winners.includes(side),
+          roundsWon: this.isFfa ? 0 : this.scores[side],
+          points: this.isFfa ? this.scores[side] : 0,
+        });
+        m.level = res.level;
+        sendWs(m.ws, { t: 'xp', ...res });
+        pushMe(m.uid);
+      });
       const names = (sides) => sides.map((s) => (this.mode === '2v2' || this.mode === '3v3' ? TEAM_NAMES[s] : this.p[s].name)).join(' & ');
       this.lastResult = `🏆 ${names(winners)} ${winners.length > 1 ? 'gagnent' : 'gagne'} (${this.scores.join(' – ')})`;
       this.state = 'lobby';
       this.p = null;
       this.broadcastRoom();
+      this.presence();
     }, 5500);
   }
 }
@@ -276,7 +409,7 @@ function newCode() {
   return c;
 }
 
-// ---------- HTTP ----------
+// ═════════════════ HTTP ═════════════════
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 const server = http.createServer((req, res) => {
   let p;
@@ -292,36 +425,144 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// ---------- WebSocket ----------
+// ═════════════════ WebSocket ═════════════════
 const wss = new WebSocketServer({ server, maxPayload: 2048 });
 
+function setUser(S, u) {
+  if (S.user) { const set = online.get(S.user.id); if (set) { set.delete(S); if (!set.size) online.delete(S.user.id); } presenceChanged(S.user.id); }
+  S.user = u;
+  if (u) {
+    if (!online.has(u.id)) online.set(u.id, new Set());
+    online.get(u.id).add(S);
+    sendWs(S.ws, { t: 'me', me: ACC.meProfile(u) });
+    presenceChanged(u.id);
+  } else {
+    sendWs(S.ws, { t: 'me', me: null });
+  }
+}
+
+function leaveRoom(S) {
+  if (!S.room) return;
+  const r = S.room, m = S.member;
+  S.room = null; S.member = null;
+  r.leave(m);
+}
+
 wss.on('connection', (ws) => {
-  let room = null, member = null;
+  const S = { ws, user: null, room: null, member: null, tries: [] };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
+
+  const reply = (msg) => sendWs(ws, msg);
+  const fail = (msg) => reply({ t: 'error', msg });
+  const rateLimited = () => {
+    const now = Date.now();
+    S.tries = S.tries.filter((t) => now - t < 60000);
+    S.tries.push(now);
+    return S.tries.length > 10;
+  };
 
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
+    const room = S.room, member = S.member;
 
-    if (m.t === 'create' || m.t === 'join') {
-      if (room) return;
-      const name = String(m.name || '').trim().slice(0, 16) || 'Joueur';
-      let r;
-      if (m.t === 'create') { r = new Room(newCode()); rooms.set(r.code, r); }
-      else {
-        r = rooms.get(String(m.code || '').toUpperCase().trim());
-        if (!r) return sendWs(ws, { t: 'error', msg: 'Aucune partie avec ce code.' });
-        if (r.members.length >= MAX_MEMBERS) return sendWs(ws, { t: 'error', msg: 'Salon plein (6 max).' });
-        if (r.state !== 'lobby') return sendWs(ws, { t: 'error', msg: 'Un match est en cours, réessaie à la fin.' });
+    switch (m.t) {
+      // ── session ──
+      case 'hello': {
+        reply({ t: 'catalog', games: CATALOG });
+        const u = m.token ? ACC.readToken(m.token) : null;
+        setUser(S, u);
+        if (m.token && !u) reply({ t: 'tokenBad' });
+        if (m.resume && m.resume.code && m.resume.key) {
+          const r = rooms.get(String(m.resume.code));
+          const mem = r && r.members.find((x) => x.key === m.resume.key);
+          if (mem) {
+            if (mem.ws && mem.ws !== ws) sendWs(mem.ws, { t: 'kicked', msg: 'Partie reprise dans un autre onglet.' });
+            S.room = r; S.member = mem;
+            r.resume(mem, ws);
+            reply({ t: 'resumed' });
+          } else reply({ t: 'resumeFail' });
+        }
+        return;
       }
-      room = r;
-      member = r.join(ws, name, m.avatar);
-      return;
-    }
-    if (!room) return;
+      case 'register':
+      case 'login': {
+        if (rateLimited()) return fail('Trop d\'essais, attends une minute.');
+        const res = m.t === 'register' ? ACC.register(m.name, m.pass) : ACC.login(m.name, m.pass);
+        if (res.err) return reply({ t: 'authErr', msg: res.err });
+        setUser(S, res.user);
+        reply({ t: 'token', token: ACC.makeToken(res.user.id) });
+        return;
+      }
+      case 'logout':
+        setUser(S, null);
+        return;
+      case 'equip': {
+        if (!S.user) return;
+        const err = ACC.equip(S.user, { avatar: m.avatar, frame: m.frame, title: m.title });
+        if (err) return fail(err);
+        pushMe(S.user.id);
+        presenceChanged(S.user.id);
+        if (room && member && room.state === 'lobby') {
+          Object.assign(member, { avatar: S.user.avatar, frame: S.user.frame, title: S.user.title, level: ACC.level(S.user) });
+          room.broadcastRoom();
+        }
+        return;
+      }
+      case 'avatar': // invité
+        if (S.user || !room || room.state !== 'lobby') return;
+        member.avatar = guestAvatar(m.avatar);
+        room.broadcastRoom();
+        return;
 
+      // ── amis ──
+      case 'friendAdd': case 'friendAccept': case 'friendRemove': {
+        if (!S.user) return fail('Connecte-toi pour avoir des amis.');
+        const err = m.t === 'friendAdd' ? ACC.friendRequest(S.user, m.name) : m.t === 'friendAccept' ? ACC.friendAccept(S.user, m.id) : ACC.friendRemove(S.user, m.id);
+        if (err) return fail(err);
+        const other = m.t === 'friendAdd' ? store.findByName(m.name) : store.get(m.id);
+        pushFriends(S.user.id);
+        if (other) pushFriends(other.id);
+        if (m.t === 'friendAdd' && other) online.get(other.id)?.forEach((S2) => sendWs(S2.ws, { t: 'friendPing', from: ACC.publicProfile(S.user) }));
+        return;
+      }
+      case 'friends':
+        if (S.user) pushFriends(S.user.id);
+        return;
+      case 'invite': {
+        if (!S.user || !room || !S.user.friends.includes(m.id)) return;
+        online.get(m.id)?.forEach((S2) => sendWs(S2.ws, { t: 'invited', from: ACC.publicProfile(S.user), code: room.code }));
+        reply({ t: 'info', msg: 'Invitation envoyée ✉️' });
+        return;
+      }
+
+      // ── salons ──
+      case 'create': case 'join': {
+        let r;
+        if (m.t === 'create') { r = new Room(newCode()); rooms.set(r.code, r); }
+        else {
+          r = rooms.get(String(m.code || '').toUpperCase().trim());
+          if (!r) return fail('Aucune partie avec ce code.');
+          if (r === room) return;
+          if (r.members.length >= MAX_MEMBERS) return fail('Salon plein (6 max).');
+          if (r.state !== 'lobby') return fail('Un match est en cours, réessaie à la fin.');
+        }
+        if (room) leaveRoom(S);
+        const name = String(m.name || '').trim().slice(0, 16) || 'Invité';
+        S.room = r;
+        S.member = r.join(S, { name, avatar: m.avatar });
+        presenceChanged(S.user && S.user.id); // le statut « dans un salon » dépend de S.member
+        return;
+      }
+      case 'leave':
+        leaveRoom(S);
+        reply({ t: 'left' });
+        return;
+    }
+
+    if (!room) return;
     switch (m.t) {
       case 'cfg':
         if (!room.isHost(member.id) || room.state !== 'lobby') return;
@@ -330,11 +571,6 @@ wss.on('connection', (ws) => {
         if (typeof m.game === 'string' && GAMES[m.game]) {
           if (room.enabled.has(m.game)) room.enabled.delete(m.game); else room.enabled.add(m.game);
         }
-        room.broadcastRoom();
-        break;
-      case 'avatar':
-        if (room.state !== 'lobby') return;
-        member.avatar = cleanAvatar(m.avatar);
         room.broadcastRoom();
         break;
       case 'team':
@@ -355,7 +591,14 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('close', () => { if (room) room.leave(member); room = null; });
+  ws.on('close', () => {
+    if (S.room && S.member && S.member.ws === ws) S.room.disconnect(S.member);
+    if (S.user) {
+      const set = online.get(S.user.id);
+      if (set) { set.delete(S); if (!set.size) online.delete(S.user.id); }
+      presenceChanged(S.user.id);
+    }
+  });
 });
 
 setInterval(() => {
@@ -366,4 +609,13 @@ setInterval(() => {
   });
 }, 15000);
 
-server.listen(PORT, HOST, () => console.log(`CLUTCH en ligne sur http://${HOST}:${PORT}`));
+async function shutdown() {
+  try { await store.close(); } catch (e) { console.error(e); }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+store.init()
+  .then(() => server.listen(PORT, HOST, () => console.log(`CLUTCH en ligne sur http://${HOST}:${PORT}`)))
+  .catch((e) => { console.error('Impossible de démarrer le stockage :', e); process.exit(1); });
