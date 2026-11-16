@@ -1,0 +1,15 @@
+{
+  "name": "clutch",
+  "version": "1.0.0",
+  "description": "Duels de mini-jeux 1v1 en ligne — premier à 3",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
