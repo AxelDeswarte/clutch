@@ -10,7 +10,7 @@ Jeu multijoueur dans le navigateur, de 2 à 6 joueurs. Chaque manche tire un min
 | Chacun pour soi | 3 à 6 | N manches, 3 / 2 / 1 pts au podium |
 
 Le nombre de manches se règle dans le salon (1 à 25). Égalité à la fin = manche décisive.
-Les 15 mini-jeux sont jouables dans tous les modes.
+Les 20 mini-jeux sont jouables dans tous les modes.
 
 **Mini-jeux** (plusieurs inspirés de Machine Party)
 | Jeu | Principe |
@@ -30,6 +30,11 @@ Les 15 mini-jeux sont jouables dans tous les modes.
 | 🕵️ Undercover | bluff (variante 1v1 : deviner le mot de l'autre en 2 essais) |
 | 🪖 Tank | ZQSD pour rouler, flèches pour viser, espace pour tirer, 2 vies, caisses destructibles |
 | 🧨 Syllabes | chacun son tour, un mot français qui contient la syllabe avant que la mèche brûle |
+| 🏎️ Circuit | course en vue pilote (route pseudo-3D), turbos au sol, voitures fantômes |
+| 🔐 Code secret | casser un code de 4 couleurs en 10 essais (⚫ bien placé, ⚪ mal placé) |
+| 🐍 Serpents | manger pour grandir, ne toucher ni mur ni serpent |
+| 🪶 Envol | un seul bouton pour battre des ailes entre les cheminées |
+| 🚩 Déminage | la même grille pour tous, premier à tout déminer |
 
 **Comptes, niveaux, skins, amis**
 - Compte (pseudo + email + mot de passe) ou jeu en invité. Connexion avec le pseudo ou l'email.
@@ -61,7 +66,7 @@ Voir **[DEPLOY.md](DEPLOY.md)** : VPS OVHcloud + un script qui installe tout (`d
 - `accounts.js` / `store.js` : comptes (mots de passe scrypt, jetons signés HMAC), email, mot de passe oublié, amis, XP. Stockage Postgres si `DATABASE_URL` est défini (Neon), sinon fichier `data/db.json`.
 - `mailer.js` : envoi des emails via Resend (`RESEND_API_KEY`). Sans clé, le lien est affiché dans la console du serveur.
 - `public/cosmetics.js` : niveaux et catalogue des skins, partagé client/serveur.
-- `games.js` : logique des 15 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
+- `games.js` : logique des 20 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
 - `public/app.js` : client (salon, affichage de chaque jeu, interpolation des jeux en temps réel).
 - `public/gags.js` : animations d'élimination (Web Animations API) + sons synthétisés (WebAudio, aucun fichier audio).
 

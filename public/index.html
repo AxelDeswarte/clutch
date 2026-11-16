@@ -278,6 +278,23 @@
   .sylbox span { font-size: 13px; color: var(--mut); }
   .sylbox.hot b { color: var(--red); animation: throb .5s infinite; }
   .typed { font-family: var(--display); font-size: 18px; word-break: break-all; }
+  .cdot { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); display: inline-block; vertical-align: middle; background: #e9e4f5; padding: 0; }
+  .cdot.empty { background: repeating-linear-gradient(45deg, #fff 0 4px, #e9e4f5 4px 8px); }
+  .crow { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .cpal .cdot { width: 48px; height: 48px; box-shadow: 0 4px 0 var(--line); cursor: pointer; position: relative; }
+  .cpal .cdot:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--line); }
+  .cpal .cdot small { position: absolute; bottom: -20px; left: 0; right: 0; font-size: 11px; color: var(--mut); }
+  .chist { display: grid; gap: 6px; margin-top: 14px; justify-items: center; }
+  .chist .cdot { width: 26px; height: 26px; border-width: 2.5px; }
+  .peg { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); display: inline-block; background: transparent; opacity: .25; }
+  .peg.b { background: var(--line); opacity: 1; } .peg.w { background: #fff; opacity: 1; }
+  .msgrid { display: grid; gap: 3px; width: min(100%, 660px); margin: 0 auto; touch-action: manipulation; user-select: none; }
+  .msgrid button { aspect-ratio: 1; border: 2px solid var(--line); border-radius: 6px; background: #b9b0e6; box-shadow: inset 0 -3px 0 rgba(27,20,64,.25); font-family: var(--display); font-size: clamp(11px, 2.3vw, 19px); padding: 0; line-height: 1; cursor: pointer; }
+  .msgrid button.o { background: #fff; box-shadow: none; cursor: default; }
+  .msgrid button.m { background: var(--red); }
+  .msgrid.off { filter: grayscale(.8) brightness(.8); }
+  .msgrid .n1 { color: #2d7dd2; } .msgrid .n2 { color: #1a9e5c; } .msgrid .n3 { color: #e0373f; } .msgrid .n4 { color: #6b3fd4; }
+  .msgrid .n5 { color: #b5541b; } .msgrid .n6 { color: #138d90; } .msgrid .n7 { color: #1b1440; } .msgrid .n8 { color: #777; }
   .typed mark { background: var(--yellow); border-radius: 4px; padding: 0 2px; }
 
   /* tactile */
