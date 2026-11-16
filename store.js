@@ -17,8 +17,17 @@ class Store {
 
   async init() {
     if (process.env.DATABASE_URL) {
-      const { Pool } = require('pg');
-      this.pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 3 });
+      // Neon : driver serverless (WebSocket sur le port 443), car certains réseaux bloquent le port Postgres 5432.
+      // Autre Postgres : driver pg classique. DATABASE_URL Neon = URL poolée, recommandée pour le trafic applicatif.
+      let Pool;
+      if (/\.neon\.tech\b/.test(process.env.DATABASE_URL)) {
+        const neon = require('@neondatabase/serverless');
+        neon.neonConfig.webSocketConstructor = require('ws');
+        Pool = neon.Pool;
+      } else {
+        Pool = require('pg').Pool;
+      }
+      this.pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
       await this.pool.query('CREATE TABLE IF NOT EXISTS clutch_users (id TEXT PRIMARY KEY, data JSONB NOT NULL)');
       const r = await this.pool.query('SELECT id, data FROM clutch_users');
       r.rows.forEach((row) => { if (row.id === '__meta') this.meta = row.data; else this._index(row.data); });

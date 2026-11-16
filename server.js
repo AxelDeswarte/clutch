@@ -2,6 +2,11 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+// En local : charge .env.local (écrit par `neon deploy` / `neon env pull`). Sur Render, les variables viennent du tableau de bord.
+for (const f of ['.env.local', '.env']) {
+  const p = path.join(__dirname, f);
+  if (fs.existsSync(p) && typeof process.loadEnvFile === 'function') { try { process.loadEnvFile(p); } catch (e) { console.warn(`${f} illisible :`, e.message); } }
+}
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { GAMES, shuffle, ri } = require('./games');
