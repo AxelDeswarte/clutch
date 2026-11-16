@@ -176,10 +176,32 @@ class Room {
     this.round++;
     this.state = 'intro';
     this.game = def.create(this);
-    const delay = def.intro || 4500;
     const decisive = this.round > this.maxRounds;
-    this.send({ t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: def.rules, round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores, delay });
-    this.later(() => { this.state = 'round'; this.game.start(); }, delay);
+    // Chacun lit les règles et clique « Prêt » ; la manche part quand tout le monde l'est
+    // (filet de sécurité : départ forcé au bout de 90 s pour ne pas bloquer sur un AFK).
+    this.roundReady = new Set();
+    this.launching = false;
+    this.send({ t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules, round: this.round, maxRounds: this.maxRounds, decisive, scores: this.scores, ready: this.readyList() });
+    this.introTimer = this.later(() => this.launch(), 90000);
+  }
+
+  readyList() { return this.p.map((_, i) => this.roundReady.has(i)); }
+
+  setRoundReady(member) {
+    if (this.state !== 'intro' || this.launching || !this.p) return;
+    const i = this.p.indexOf(member);
+    if (i < 0) return;
+    this.roundReady.add(i);
+    this.send({ t: 'readyState', ready: this.readyList() });
+    if (this.roundReady.size === this.n) this.launch();
+  }
+
+  launch() {
+    if (this.state !== 'intro' || this.launching) return;
+    this.launching = true;
+    this.cancel(this.introTimer);
+    this.send({ t: 'countdown', ms: 3000 });
+    this.later(() => { this.launching = false; this.state = 'round'; this.game.start(); }, 3000);
   }
 
   input(member, m) {
@@ -326,6 +348,9 @@ wss.on('connection', (ws) => {
         break;
       case 'input':
         room.input(member, m);
+        break;
+      case 'ready':
+        room.setRoundReady(member);
         break;
     }
   });

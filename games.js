@@ -55,7 +55,7 @@ GAMES.reflex = {
   desc: 'Dégaine au signal, pas avant',
   title: 'Duel au soleil',
   min: 2,
-  rules: "Main sur le flingue. Au cri « FEU ! », ESPACE (ou tap) le plus vite possible. Dégainer avant = le shérif t'abat.",
+  rules: "Main sur le flingue. Au cri « FEU ! », ESPACE (ou tap) le plus vite possible. Méfie-toi des faux signaux (FEUILLE, FOU…) : dégainer avant le vrai = le shérif t'abat.",
   create(room) {
     const n = room.n;
     const t = new Array(n).fill(null);
@@ -78,11 +78,18 @@ GAMES.reflex = {
       start() {
         phase = 'wait';
         room.send({ t: 'g', k: 'wait' });
+        const delay = 2000 + Math.random() * 5000;
+        const FAKES = ['FEUILLE !', 'FOU !', 'FÊTE !', 'FEUTRE !', 'FEU… rouge', "FEUX d'artifice", 'FESSE !'];
+        const nf = ri(0, 2);
+        for (let k = 0; k < nf; k++) {
+          const at = 900 + Math.random() * (delay - 1500);
+          room.later(() => { if (phase === 'wait') room.send({ t: 'g', k: 'fake', txt: pick(FAKES) }); }, at);
+        }
         room.later(() => {
           phase = 'go';
           room.send({ t: 'g', k: 'go' });
           room.later(end, 3000);
-        }, 1500 + Math.random() * 3500);
+        }, delay);
       },
       input(i, m) {
         if (m.a !== 'press' || phase === 'idle' || phase === 'done' || fs[i] || t[i] != null) return;
@@ -121,7 +128,7 @@ GAMES.seq = {
     const state = () => ({ t: 'g', k: 's', pos: pos.map((p) => +p.toFixed(2)), c: +c.toFixed(2), al: alive, idx });
     function step() {
       t += DT;
-      c += (0.9 + t * 0.045) * DT;
+      c += (1.1 + t * 0.06) * DT;
       range(n).forEach((i) => {
         if (alive[i] && !race.done[i] && c >= pos[i]) { alive[i] = false; deathT[i] = t; room.eliminate(i); }
       });
@@ -137,7 +144,7 @@ GAMES.seq = {
       input(i, m) {
         if (m.a !== 'key' || !alive[i] || race.done[i] || !DIRS.includes(m.key)) return;
         if (m.key === seq[idx[i] % seq.length]) { idx[i]++; pos[i] = Math.min(TOP, pos[i] + 1); }
-        else pos[i] = Math.max(0, pos[i] - 1.5);
+        else pos[i] = Math.max(0, pos[i] - 2);
         if (pos[i] >= TOP) race.finish(i, end);
         room.send(state());
         check();
@@ -155,7 +162,7 @@ GAMES.tron = {
   rules: 'Dirige ton trait (flèches ou ZQSD). Touche un bord ou un trait = éliminé. Coince les autres !',
   create(room) {
     const n = room.n;
-    const W = n <= 2 ? 48 : 64, H = n <= 2 ? 32 : 42, TICK = 75;
+    const W = n <= 2 ? 48 : 64, H = n <= 2 ? 32 : 42, TICK = 65;
     const D = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
     const q4 = Math.floor(H / 4), q34 = Math.floor((3 * H) / 4), mid = H >> 1, cx = W >> 1;
@@ -198,7 +205,7 @@ GAMES.tron = {
     return {
       start() {
         room.send({ t: 'g', k: 'tron', w: W, h: H, heads: p.map((a) => [a.x, a.y]) });
-        room.later(() => room.every(step, TICK), 900);
+        room.later(() => room.every(step, TICK), 2000);
         room.later(() => room.finish(deathTick, 'Temps écoulé.'), 120000);
       },
       input(i, m) {
@@ -215,31 +222,34 @@ GAMES.tron = {
 // ───────────────────────── MÉMOIRE ─────────────────────────
 GAMES.memory = {
   icon: '🧠',
-  desc: 'Retiens les cases, sinon pan',
+  desc: "Reproduis la séquence dans l'ordre",
   title: 'Mémoire',
   min: 2,
-  rules: "Des cases s'allument : mémorise-les, puis reclique-les toutes. Une erreur ou trop lent = une balle. Chaque niveau ajoute une case.",
+  rules: "Des cases s'allument une par une : reclique-les DANS LE MÊME ORDRE. Chaque niveau ajoute une case au bout de la séquence et accélère. Une erreur ou trop lent = une balle. Ça continue jusqu'au dernier survivant, même en équipe.",
   create(room) {
     const G = 5, n = room.n;
     const alive = new Array(n).fill(true);
     const score = new Array(n).fill(0);
-    let level = 0, cells = [], found = [], done = [], phase = 'idle';
+    const seq = [ri(0, G * G - 1)];
+    let level = 0, prog = [], done = [], phase = 'idle';
+    const aliveCount = () => alive.filter(Boolean).length;
+    const addCell = () => { let c; do { c = ri(0, G * G - 1); } while (c === seq[seq.length - 1]); seq.push(c); };
 
     function next() {
       level++;
-      const k = Math.min(2 + level, 18);
-      cells = shuffle(range(G * G)).slice(0, k);
-      found = range(n).map(() => new Set());
+      addCell();
+      if (level === 1) addCell();
+      prog = new Array(n).fill(0);
       done = new Array(n).fill(false);
       phase = 'show';
-      const showMs = 1000 + k * 170;
-      room.send({ t: 'g', k: 'show', level, cells, ms: showMs, alive });
+      const on = Math.max(230, 480 - level * 22), off = Math.max(70, 150 - level * 7);
+      room.send({ t: 'g', k: 'show', level, seq, on, off, alive });
       room.later(() => {
         phase = 'input';
-        const ms = 5000 + k * 500;
-        room.send({ t: 'g', k: 'input', level, ms });
+        const ms = 2000 + seq.length * 550;
+        room.send({ t: 'g', k: 'input', level, ms, len: seq.length });
         room.later(timeout, ms);
-      }, showMs);
+      }, seq.length * (on + off) + 350);
     }
     function kill(i) { alive[i] = false; room.eliminate(i); }
     function timeout() {
@@ -251,10 +261,10 @@ GAMES.memory = {
       if (phase !== 'input') return;
       phase = 'between';
       room.send({ t: 'g', k: 'st', alive, done });
-      if (room.survivalOver(alive) || level >= 16) {
-        return room.finish(score.map((s, i) => (alive[i] ? 1e9 + s : s)), `Niveau atteint : ${level}`);
+      if (aliveCount() <= 1 || level >= 40) {
+        return room.finish(score.map((s, i) => (alive[i] ? 1e9 + s : s)), `Séquence atteinte : ${seq.length} cases`);
       }
-      room.later(next, 1000);
+      room.later(next, 1200);
     }
 
     return {
@@ -262,19 +272,17 @@ GAMES.memory = {
       input(i, m) {
         if (m.a !== 'tap' || phase !== 'input' || !alive[i] || done[i]) return;
         const c = m.c | 0;
-        if (found[i].has(c)) return;
-        if (cells.includes(c)) {
-          found[i].add(c);
-          score[i] = level * 100 + found[i].size;
-          room.send({ t: 'g', k: 'ok', c }, i);
-          if (found[i].size === cells.length) { done[i] = true; score[i] = level * 100 + 50; }
+        if (c === seq[prog[i]]) {
+          prog[i]++;
+          score[i] = level * 100 + prog[i];
+          room.send({ t: 'g', k: 'ok', c, p: prog[i] }, i);
+          if (prog[i] === seq.length) { done[i] = true; score[i] = level * 100 + 99; }
         } else {
-          score[i] = level * 100 + found[i].size;
           room.send({ t: 'g', k: 'bad', c }, i);
           kill(i);
         }
         room.send({ t: 'g', k: 'st', alive, done });
-        if (room.survivalOver(alive) || alive.every((a, j) => !a || done[j])) levelEnd();
+        if (aliveCount() <= 1 || alive.every((a, j) => !a || done[j])) levelEnd();
       },
     };
   },
@@ -286,20 +294,18 @@ GAMES.dodge = {
   desc: 'Esquive les scies et les lasers',
   title: 'Lames',
   min: 2,
-  rules: "Des scies circulaires ricochent partout, puis des lasers balaient la salle. Flèches / ZQSD pour bouger. Les contours en pointillés ne coupent pas encore. Dernier entier gagne.",
+  rules: "Des scies circulaires ricochent partout, puis des lasers balaient la salle. Flèches / ZQSD pour bouger, ESPACE pour bousculer le joueur le plus proche. Les contours en pointillés ne coupent pas encore. Dernier entier gagne.",
   create(room) {
-    const n = room.n, W = 800, H = 500, PR = 11, SP = 240, DT = 1 / 30;
-    const pl = range(n).map((i) => {
-      const a = (i / n) * Math.PI * 2 + Math.PI;
-      return { x: W / 2 + Math.cos(a) * 170, y: H / 2 + Math.sin(a) * 120, dx: 0, dy: 0, alive: true };
-    });
+    const n = room.n, W = 800, H = 500, PR = 11, DT = 1 / 30;
+    const A = makeArena(room, { W, H, SP: 240, PR, spawn: circleSpawn(W, H, 170, 120) });
+    const pl = A.pl;
     const deathT = new Array(n).fill(Infinity);
     const balls = [], lasers = [];
     let t = 0, nextSpawn = 1.2;
 
     function spawn() {
       const r = 12 + Math.random() * 16;
-      const sp = (150 + t * 5) * (0.8 + Math.random() * 0.4);
+      const sp = (175 + t * 6.5) * (0.8 + Math.random() * 0.4);
       const e = ri(0, 3);
       const x = e === 0 ? r : e === 1 ? W - r : r + Math.random() * (W - 2 * r);
       const y = e === 2 ? r : e === 3 ? H - r : r + Math.random() * (H - 2 * r);
@@ -314,9 +320,9 @@ GAMES.dodge = {
     }
     function step() {
       t += DT;
-      if (t >= nextSpawn && balls.length < 30) { spawn(); nextSpawn = t + Math.max(0.8, 2.4 - t * 0.04); }
-      if (t > 8 && lasers.length === 0) lasers.push({ a: Math.random() * 6.28, w: 0.75, born: t });
-      if (t > 24 && lasers.length === 1) lasers.push({ a: lasers[0].a + Math.PI / 2, w: -1.0, born: t });
+      if (t >= nextSpawn && balls.length < 34) { spawn(); nextSpawn = t + Math.max(0.6, 2.0 - t * 0.05); }
+      if (t > 6 && lasers.length === 0) lasers.push({ a: Math.random() * 6.28, w: 0.8, born: t });
+      if (t > 18 && lasers.length === 1) lasers.push({ a: lasers[0].a + Math.PI / 2, w: -1.05, born: t });
       lasers.forEach((L) => { L.a += L.w * DT * (1 + t / 60); });
       balls.forEach((b) => {
         b.x += b.vx * DT; b.y += b.vy * DT; if (b.g > 0) b.g -= DT;
@@ -326,11 +332,9 @@ GAMES.dodge = {
         if (b.y > H - b.r) { b.y = H - b.r; b.vy = -Math.abs(b.vy); }
       });
       const died = [];
+      A.move(DT);
       pl.forEach((p, i) => {
         if (!p.alive) return;
-        const len = Math.hypot(p.dx, p.dy) || 1;
-        p.x = Math.max(PR, Math.min(W - PR, p.x + (p.dx / len) * SP * DT));
-        p.y = Math.max(PR, Math.min(H - PR, p.y + (p.dy / len) * SP * DT));
         let hit = balls.some((b) => b.g <= 0 && Math.hypot(p.x - b.x, p.y - b.y) < PR + b.r - 3);
         lasers.forEach((L) => {
           if (t - L.born < 1.5) return;
@@ -355,11 +359,7 @@ GAMES.dodge = {
         room.send({ t: 'g', k: 'dodge', w: W, h: H, pr: PR });
         room.every(step, 1000 / 30);
       },
-      input(i, m) {
-        if (m.a !== 'mv') return;
-        const c = (v) => Math.max(-1, Math.min(1, Math.round(Number(v) || 0)));
-        pl[i].dx = c(m.x); pl[i].dy = c(m.y);
-      },
+      input(i, m) { A.input(i, m); },
     };
   },
 };
@@ -374,7 +374,7 @@ GAMES.race = {
   create(room) {
     const n = room.n, L = 4200, DT = 1 / 30;
     const hurdles = [];
-    for (let x = 550; x < L - 250; x += 280 + Math.random() * 230) hurdles.push(Math.round(x));
+    for (let x = 500; x < L - 250; x += 235 + Math.random() * 200) hurdles.push(Math.round(x));
     const r = range(n).map(() => ({ x: 0, v: 0, y: 0, vy: 0, last: null, st: 0, hit: new Set() }));
     const race = new Race(room);
     const end = () => room.finish(race.scores(r.map((p) => Math.min(p.x / L, 0.999))));
@@ -391,7 +391,7 @@ GAMES.race = {
         p.x += p.v * DT;
         if (race.done[i]) return;
         for (const h of hurdles) {
-          if (ox < h && p.x >= h && p.y < 36 && !p.hit.has(h)) { p.hit.add(h); p.v = Math.min(p.v, 60); p.st = 0.5; }
+          if (ox < h && p.x >= h && p.y < 36 && !p.hit.has(h)) { p.hit.add(h); p.v = Math.min(p.v, 40); p.st = 0.65; }
         }
         if (p.x >= L) race.finish(i, end);
       });
@@ -421,7 +421,7 @@ GAMES.race = {
 
 
 // ═════════════════ Arène commune (déplacement + bousculade) ═════════════════
-function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [] }) {
+function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [], SHOVE = 360 }) {
   const n = room.n;
   const pl = range(n).map((i) => { const [x, y] = spawn(i, n); return { x, y, dx: 0, dy: 0, vx: 0, vy: 0, alive: true, cd: 0, still: 0 }; });
   const A = {
@@ -433,12 +433,16 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [] }) {
         p.dx = c(m.x); p.dy = c(m.y); return true;
       }
       if (m.a === 'shove' && p.cd <= 0) {
-        let best = -1, bd = 56;
+        let best = -1, bd = PR * 2 + 26;
         pl.forEach((q, j) => { if (j !== i && q.alive) { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; best = j; } } });
-        p.cd = 1.1;
+        p.cd = 1.3;
         if (best >= 0) {
-          const q = pl[best], d = bd || 1;
-          q.vx += ((q.x - p.x) / d) * 780; q.vy += ((q.y - p.y) / d) * 780;
+          const q = pl[best];
+          let dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy);
+          if (d < 0.01) { const a = Math.random() * 6.28; dx = Math.cos(a); dy = Math.sin(a); d = 1; }
+          // seule la cible est projetée (~55 px), le pousseur ne bouge pas
+          q.vx = (dx / d) * SHOVE; q.vy = (dy / d) * SHOVE;
+          p.vx = 0; p.vy = 0;
           room.send({ t: 'g', k: 'shove', i, j: best });
         }
         return true;
@@ -446,6 +450,7 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [] }) {
       return false;
     },
     move(DT, speedOf) {
+      A.collide();
       pl.forEach((p, i) => {
         if (!p.alive) return;
         if (p.cd > 0) p.cd -= DT;
@@ -453,7 +458,7 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [] }) {
         const sp = speedOf ? speedOf(i) : SP;
         p.x += ((p.dx / len) * sp + p.vx) * DT;
         p.y += ((p.dy / len) * sp + p.vy) * DT;
-        p.vx *= Math.pow(0.02, DT); p.vy *= Math.pow(0.02, DT);
+        p.vx *= Math.pow(0.0015, DT); p.vy *= Math.pow(0.0015, DT);
         p.still = p.dx === 0 && p.dy === 0 && Math.hypot(p.vx, p.vy) < 20 ? p.still + DT : 0;
         p.x = Math.max(PR, Math.min(W - PR, p.x)); p.y = Math.max(PR, Math.min(H - PR, p.y));
         rects.forEach(([rx, ry, rw, rh]) => {
@@ -467,6 +472,15 @@ function makeArena(room, { W, H, SP = 230, PR = 12, spawn, rects = [] }) {
       });
     },
     snap() { return pl.map((p) => [Math.round(p.x), Math.round(p.y), p.alive ? 1 : 0]); },
+    collide() {
+      // les joueurs ne se traversent plus : on sépare les cercles qui se chevauchent
+      for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
+        const p = pl[a], q = pl[b];
+        if (!p.alive || !q.alive) continue;
+        const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy), min = PR * 2;
+        if (d > 0 && d < min) { const k = (min - d) / 2 / d; p.x -= dx * k; p.y -= dy * k; q.x += dx * k; q.y += dy * k; }
+      }
+    },
   };
   return A;
 }
@@ -477,21 +491,21 @@ const FRAMES = [['🖼️', 'Portrait de famille'], ['🖼️', 'Photo de ton ex
 const PARTS = [['🔩', 'Boulon'], ['⚙️', 'Engrenage'], ['🔧', 'Clé à molette'], ['🪛', 'Tournevis'], ['🔗', 'Chaîne'], ['🧲', 'Aimant']];
 GAMES.filter = {
   icon: '🔥',
-  desc: 'Brûle les portraits, garde la ferraille',
+  desc: 'Trie les portraits et la ferraille',
   title: 'Le Filtre',
   min: 2,
-  rules: "Un tapis roulant passe devant le four. ESPACE (ou tap) quand l'objet est dans la zone = au four. Brûle les PORTRAITS 🖼️, laisse passer la FERRAILLE 🔩. Bonne décision +1, mauvaise −1. Le pire trieur finit dans le four.",
+  rules: "Un tapis roulant. Quand un objet passe dans la zone jaune, trie-le : ⬅ ou Q = 🔥 FOUR pour les PORTRAITS 🖼️ · ➡ ou D = 📦 CAISSE pour la FERRAILLE 🔩. Bonne décision +1, mauvaise ou oubliée −1. Ça accélère. Le pire trieur finit au four.",
   create(room) {
-    const n = room.n, N = 28, HALF = 320, TOL = 180;
+    const n = room.n, N = 30, HALF = 300, TOL = 160;
     const items = [];
-    let t = 2200;
+    let t = 2400;
     for (let k = 0; k < N; k++) {
-      const frame = Math.random() < 0.42;
+      const frame = Math.random() < 0.5;
       const [e, name] = pick(frame ? FRAMES : PARTS);
       items.push({ e, n: name, f: frame, t: Math.round(t) });
-      t += Math.max(520, 1150 - k * 26) + Math.random() * 200;
+      t += Math.max(430, 1050 - k * 24) + Math.random() * 160;
     }
-    const burned = range(n).map(() => new Set());
+    const dec = range(n).map(() => new Map());
     const score = new Array(n).fill(0);
     let t0 = 0;
     return {
@@ -499,20 +513,22 @@ GAMES.filter = {
         t0 = Date.now();
         room.send({ t: 'g', k: 'belt', items: items.map((x) => ({ e: x.e, n: x.n, t: x.t })), half: HALF });
         items.forEach((it, k) => room.later(() => {
+          // 1 = bon tri, 0 = mauvais bac, 2 = oublié
           const res = range(n).map((i) => {
-            const ok = burned[i].has(k) === it.f;
-            score[i] += ok ? 1 : -1;
-            return ok ? 1 : 0;
+            const d = dec[i].get(k);
+            const r = d === undefined ? 2 : (d === 0) === it.f ? 1 : 0;
+            score[i] += r === 1 ? 1 : -1;
+            return r;
           });
-          room.send({ t: 'g', k: 'res', idx: k, res, s: score, f: it.f });
+          room.send({ t: 'g', k: 'res', idx: k, res, s: score });
           if (k === N - 1) room.later(() => room.finish([...score], 'Scores : ' + range(n).map((i) => `${room.name(i)} ${score[i]}`).join(' · ')), 600);
         }, it.t + HALF + TOL + 50));
       },
       input(i, m) {
-        if (m.a !== 'burn') return;
+        if (m.a !== 'sort' || (m.b !== 0 && m.b !== 1)) return;
         const el = Date.now() - t0;
-        const k = items.findIndex((it, kk) => !burned[i].has(kk) && Math.abs(el - it.t) <= HALF + TOL);
-        if (k >= 0) burned[i].add(k);
+        const k = items.findIndex((it, kk) => !dec[i].has(kk) && Math.abs(el - it.t) <= HALF + TOL);
+        if (k >= 0) dec[i].set(k, m.b);
       },
     };
   },
@@ -536,14 +552,14 @@ GAMES.floor = {
 
     function newPhase() {
       phase++;
-      if (phase > 1) for (let k = 0; k < 3; k++) { const free = range(C * R).filter((x) => !removed[x]); if (free.length > 8) removed[pick(free)] = true; }
+      if (phase > 1) for (let k = 0; k < 4; k++) { const free = range(C * R).filter((x) => !removed[x]); if (free.length > 8) removed[pick(free)] = true; }
       target = ri(0, 3);
-      const frac = Math.max(0.1, 0.32 - phase * 0.03);
+      const frac = Math.max(0.07, 0.26 - phase * 0.03);
       const live = range(C * R).filter((x) => !removed[x]);
       const safe = new Set(shuffle([...live]).slice(0, Math.max(2, Math.round(live.length * frac))));
       tiles = range(C * R).map((x) => (removed[x] ? -1 : safe.has(x) ? target : pick([0, 1, 2, 3].filter((v) => v !== target))));
       holes = null;
-      const warn = Math.max(1700, 3600 - phase * 220);
+      const warn = Math.max(1300, 3000 - phase * 220);
       room.send({ t: 'g', k: 'ph', tiles, target, ms: warn, phase });
       room.later(drop, warn);
     }
@@ -585,10 +601,10 @@ GAMES.smoke = {
   min: 2,
   rules: "Maintiens ESPACE pour tirer, relâche dans la zone verte = une taffe. Trop long = tu tousses (bloqué 2 s). Trop court = taffe gâchée. Chaque taffe a son propre rythme. 25 secondes : le pire fumeur se fait abattre.",
   create(room) {
-    const n = room.n, LO = 70, HI = 95;
+    const n = room.n, LO = 78, HI = 93;
     const st = range(n).map(() => ({ s: 'idle', t: 0, fill: 1400, tm: null }));
     const puffs = new Array(n).fill(0);
-    const newFill = () => ri(800, 2100);
+    const newFill = () => ri(650, 2000);
     let live = false;
     function setIdle(i) { st[i].s = 'idle'; st[i].fill = newFill(); room.send({ t: 'g', k: 'next', fill: st[i].fill }, i); }
     function cough(i) {
@@ -634,7 +650,7 @@ GAMES.manners = {
   min: 2,
   rules: "Maintiens ESPACE pour bouffer. Quand Tonton Gérard baisse son journal, ARRÊTE-TOI ou il te flingue à table. Il froisse son journal juste avant. Premier à finir son assiette gagne.",
   create(room) {
-    const n = room.n, DT = 0.05, RATE = 13;
+    const n = room.n, DT = 0.05, RATE = 11;
     const pr = new Array(n).fill(0), eat = new Array(n).fill(false), alive = new Array(n).fill(true), deathT = new Array(n).fill(0);
     const race = new Race(room);
     let ph = 'read', lookAt = 0, t = 0;
@@ -649,14 +665,14 @@ GAMES.manners = {
         room.later(() => {
           ph = 'look'; lookAt = Date.now(); room.send({ t: 'g', k: 'ph', ph });
           room.later(cycle, 1200 + Math.random() * 1600);
-        }, 450 + Math.random() * 450);
-      }, 1500 + Math.random() * 3000);
+        }, 300 + Math.random() * 350);
+      }, 1200 + Math.random() * 2600);
     }
     function step() {
       t += DT;
       range(n).forEach((i) => {
         if (!alive[i] || race.done[i] || !eat[i]) return;
-        if (ph === 'look') { if (Date.now() - lookAt > 220) shoot(i); return; }
+        if (ph === 'look') { if (Date.now() - lookAt > 180) shoot(i); return; }
         pr[i] = Math.min(100, pr[i] + RATE * DT);
         if (pr[i] >= 100) { eat[i] = false; race.finish(i, end); }
       });
@@ -667,7 +683,7 @@ GAMES.manners = {
       start() { room.send({ t: 'g', k: 'table' }); cycle(); room.every(step, DT * 1000); room.later(end, 60000); },
       input(i, m) {
         if (!alive[i] || race.done[i]) return;
-        if (m.a === 'eat') { eat[i] = true; if (ph === 'look' && Date.now() - lookAt > 220) { shoot(i); check(); } }
+        if (m.a === 'eat') { eat[i] = true; if (ph === 'look' && Date.now() - lookAt > 180) { shoot(i); check(); } }
         if (m.a === 'stop') eat[i] = false;
       },
     };
@@ -686,9 +702,9 @@ GAMES.bomb = {
     const rects = [[180, 120, 60, 60], [560, 120, 60, 60], [180, 320, 60, 60], [560, 320, 60, 60], [370, 220, 60, 60]];
     const A = makeArena(room, { W, H, SP: 225, PR: 13, rects, spawn: circleSpawn(W, H, 330, 200) });
     const deathT = new Array(n).fill(Infinity);
-    let holder = -1, prev = -1, fuse = 0, grab = 0, t = 0, pause = 1.2;
+    let holder = -1, prev = -1, fuse = 0, grab = 0, t = 0, pause = 2.2, first = true;
     const aliveIdx = () => range(n).filter((i) => A.pl[i].alive);
-    function arm() { const a = aliveIdx(); holder = pick(a); prev = -1; fuse = 9 + Math.random() * 8; grab = 1; room.send({ t: 'g', k: 'arm', i: holder }); }
+    function arm() { const a = aliveIdx(); holder = pick(a); prev = -1; fuse = first ? 17 + Math.random() * 5 : 8 + Math.random() * 6; first = false; grab = 1; room.send({ t: 'g', k: 'arm', i: holder }); }
     function step() {
       t += DT;
       A.move(DT, (i) => (i === holder ? 255 : 225));
@@ -730,9 +746,9 @@ GAMES.mines = {
     const n = room.n, L = 2600, H = 420, DT = 1 / 30, MR = 16, BLAST = 38;
     const A = makeArena(room, { W: L, H, SP: 190, PR: 12, spawn: (i, nn) => [60, H * (i + 1) / (nn + 1)] });
     const mines = [];
-    while (mines.length < 85) {
+    while (mines.length < 105) {
       const x = 220 + Math.random() * (L - 340), y = 20 + Math.random() * (H - 40);
-      if (mines.every((m) => Math.hypot(m.x - x, m.y - y) > 55)) mines.push({ x, y, on: true });
+      if (mines.every((m) => Math.hypot(m.x - x, m.y - y) > 50)) mines.push({ x, y, on: true });
     }
     const known = range(n).map(() => new Set());
     const deathT = new Array(n).fill(0);
@@ -743,7 +759,7 @@ GAMES.mines = {
     function kill(i) { const p = A.pl[i]; if (!p.alive) return; p.alive = false; deathT[i] = t; room.eliminate(i); }
     function step() {
       t += DT;
-      hv += (55 + t * 2.6) * DT;
+      hv += (65 + t * 3) * DT;
       A.move(DT);
       A.pl.forEach((p, i) => {
         if (!p.alive || race.done[i]) return;
@@ -791,7 +807,9 @@ GAMES.undercover = {
   title: 'Undercover',
   min: 2,
   intro: 7000,
-  rules: "1v1 : chacun a un mot proche de l'autre — à ton tour, donne un indice ou tente de deviner son mot (2 essais). À 3+ : tout le monde a le même mot… sauf l'undercover, qui a un mot proche (et ne sait pas qu'il est undercover !). À ton tour, donne un indice, puis tout le monde vote pour éliminer l'intrus. Mettez-vous en vocal pour débattre.",
+  rules: (n) => (n === 2
+    ? "Duel : chacun a un mot proche de celui de l'autre. À ton tour, donne UN SEUL mot d'indice, ou tente de deviner son mot (2 essais max). Attention, tes indices l'aident aussi à trouver le tien. Indice trop proche de ton mot = refusé."
+    : "Tout le monde a le même mot… sauf l'undercover, qui a un mot proche (et ne sait pas qu'il est undercover !). À ton tour, donne UN SEUL mot d'indice (trop proche de ton mot = refusé), puis tout le monde vote pour éliminer l'intrus. Jouez en vocal, et cachez votre mot si vous êtes dans la même pièce."),
   create(room) {
     const n = room.n;
     if (n === 2) return undercoverDuel(room);
@@ -868,12 +886,10 @@ GAMES.undercover = {
       input(i, m) {
         if (m.a === 'clue') {
           if (phase !== 'clue' || order[turn] !== i) return;
-          const text = String(m.text || '').trim().slice(0, 24);
+          const text = String(m.text || '').trim().slice(0, 20);
           if (!text) return;
-          const a = norm(text), w = norm(word(i));
-          if (a && w && (a.includes(w) || w.includes(a))) {
-            return room.send({ t: 'g', k: 'nope', msg: 'Interdit de donner ton mot (ou un bout) !' }, i);
-          }
+          const bad = clueProblem(text, word(i));
+          if (bad) return room.send({ t: 'g', k: 'nope', msg: bad }, i);
           giveClue(i, text);
         } else if (m.a === 'vote') {
           const target = m.target | 0;
@@ -900,6 +916,20 @@ function lev(a, b) {
     }
   }
   return d[b.length];
+}
+// Anti-triche : un seul mot, et rien qui ressemble à son propre mot (morceau, même racine, faute de frappe…)
+function clueProblem(text, word) {
+  if (/\s/.test(text.trim())) return 'Un seul mot ! (pas d\'espace)';
+  const a = norm(text);
+  if (a.length < 2) return 'Indice trop court.';
+  const parts = [norm(word), ...word.split(/[\s'’-]+/).map(norm)].filter((w) => w.length >= 3);
+  for (const w of parts) {
+    if (a.includes(w) || w.includes(a)) return 'Interdit : ça contient ton mot (ou l\'inverse) !';
+    let pre = 0; while (pre < a.length && pre < w.length && a[pre] === w[pre]) pre++;
+    if (pre >= 4 || (pre >= 3 && Math.min(a.length, w.length) <= 5)) return 'Trop proche de ton mot (même début) !';
+    if (lev(a, w) / Math.max(a.length, w.length) <= 0.4) return 'Trop proche de ton mot !';
+  }
+  return null;
 }
 const sameWord = (a, b) => { const x = norm(a), y = norm(b); return x === y || (y.length > 4 && lev(x, y) <= 1); };
 
@@ -932,9 +962,9 @@ function undercoverDuel(room) {
       const text = String(m.text || '').trim().slice(0, 24);
       if (!text) return;
       if (m.a === 'clue') {
-        const a = norm(text), w = norm(pair[i]);
-        if (a && w && (a.includes(w) || w.includes(a))) return room.send({ t: 'g', k: 'nope', msg: 'Interdit de donner ton mot (ou un bout) !' }, i);
-        clue(i, text);
+        const bad = clueProblem(text.slice(0, 20), pair[i]);
+        if (bad) return room.send({ t: 'g', k: 'nope', msg: bad }, i);
+        clue(i, text.slice(0, 20));
       } else if (m.a === 'guess') {
         room.cancel(tt);
         if (sameWord(text, pair[1 - i])) {

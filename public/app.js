@@ -15,7 +15,7 @@ const MEDALS = ['🥇', '🥈', '🥉'];
 
 let ws = null, room = null, M = null, scores = [], prevScores = [], roundNo = 0, decisive = false;
 let cur = null, active = false, dead = false;
-let toLobbyTimer = null, countTimer = null, gagTimer = null;
+let toLobbyTimer = null, countTimer = null, gagTimer = null, introOpen = false;
 let myAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
 try { myAvatar = localStorage.getItem('clutch-avatar') || myAvatar; } catch {}
 
@@ -67,20 +67,34 @@ function overlay({ icon, title, color, text, delay, badge }) {
   $('#ovGag').innerHTML = '';
   $('#ovList').innerHTML = '';
   $('#ovCount').innerHTML = '';
-  if (delay) {
-    const end = Date.now() + delay;
-    let last = null;
-    const tick = () => {
-      const s = Math.ceil((end - Date.now()) / 1000);
-      if (s === last) return;
-      last = s;
-      if (s > 0 && s <= 3) SFX.play('tick');
-      $('#ovCount').innerHTML = s > 0 ? `<div class="countbub">${s}</div>` : '';
-    };
-    tick();
-    countTimer = setInterval(tick, 100);
-  }
+  $('#ovReady').innerHTML = '';
+  introOpen = false;
+  if (delay) startCount(delay);
 }
+function startCount(ms) {
+  clearInterval(countTimer);
+  const end = Date.now() + ms;
+  let last = null;
+  const tick = () => {
+    const s = Math.ceil((end - Date.now()) / 1000);
+    if (s === last) return;
+    last = s;
+    if (s > 0 && s <= 3) SFX.play('tick');
+    $('#ovCount').innerHTML = s > 0 ? `<div class="countbub">${s}</div>` : '';
+  };
+  tick();
+  countTimer = setInterval(tick, 100);
+}
+function renderReady(list) {
+  if (!M) return;
+  const meReady = list[M.me];
+  const n = list.filter(Boolean).length;
+  $('#ovReady').innerHTML = `<div class="readyrow">${M.players.map((p, i) => `<span class="pill" style="background:${list[i] ? p.color : '#ece7f7'};${list[i] ? '' : 'opacity:.65'}"><span class="av">${esc(p.avatar)}</span>${esc(p.name)}${i === M.me ? ' (toi)' : ''} ${list[i] ? '✔' : '…'}</span>`).join('')}</div>
+    ${meReady ? `<p class="mut">✔ Prêt — en attente des autres (${n}/${list.length})</p>` : `<button class="btn big green" id="btnReady">✅ J'ai lu, prêt ! <span style="font-size:14px">(Entrée)</span></button>`}`;
+  const b = $('#btnReady');
+  if (b) b.onclick = sendReady;
+}
+function sendReady() { if (introOpen) { SFX.unlock(); send({ t: 'ready' }); } }
 function hideOverlay() { clearInterval(countTimer); $('#overlay').classList.add('hidden'); $('#ovGag').innerHTML = ''; }
 function hideGag() { clearTimeout(gagTimer); $('#gagLayer').classList.add('hidden'); $('#gagLayer .gwrap').innerHTML = ''; }
 
@@ -234,7 +248,17 @@ function onMsg(m) {
       cur = GAMES[m.game]; active = false; dead = false;
       $('#stage').innerHTML = '';
       cur.init();
-      overlay({ icon: m.icon, title: m.title, text: m.rules, delay: m.delay, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : `Manche ${m.round} / ${m.maxRounds}` });
+      overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : `Manche ${m.round} / ${m.maxRounds}` });
+      introOpen = true;
+      renderReady(m.ready);
+      break;
+    case 'readyState':
+      if (introOpen) renderReady(m.ready);
+      break;
+    case 'countdown':
+      introOpen = false;
+      $('#ovReady').innerHTML = '';
+      startCount(m.ms);
       break;
     case 'g':
       if (!cur || !M) break;
@@ -336,6 +360,7 @@ function showMatchEnd(m) {
 // ════════════════ entrées clavier ════════════════
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
+  if (introOpen && e.key === 'Enter') { e.preventDefault(); sendReady(); return; }
   if (active && !dead && cur && cur.key) cur.key(e);
 });
 document.addEventListener('keyup', (e) => { if (active && cur && cur.keyup) cur.keyup(e); });
@@ -364,7 +389,13 @@ GAMES.reflex = {
   set(cls, face, txt) { $('#rx').className = 'rx ' + cls; $('#rx .face').textContent = face; $('#rxt').textContent = txt; },
   msg(m) {
     if (m.k === 'wait') this.set('wait', '😐', 'Attends…');
+    if (m.k === 'fake' && !this.done) {
+      this.set('fake', '🤡', m.txt);
+      clearTimeout(this.ft);
+      this.ft = setTimeout(() => { if (!this.done && $('#rx') && $('#rx').classList.contains('fake')) this.set('wait', '😐', 'Attends…'); }, 700);
+    }
     if (m.k === 'go') {
+      clearTimeout(this.ft);
       this.set('go', '🔫', 'FEU !');
       this.t0 = performance.now();
       requestAnimationFrame((t) => { this.t0 = t; });
@@ -517,53 +548,77 @@ GAMES.seq = {
 // ── Le Filtre ──
 GAMES.filter = {
   init() {
-    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${legend()}
-      <p class="sub">ESPACE / tap = au four 🔥 · brûle les 🖼️ portraits, laisse passer la 🔩 ferraille</p>`;
-    if (isTouch) $('#stage').appendChild(holdBtn('🔥 AU FOUR', () => this.burn(), () => {}));
-    this.items = null; this.burned = new Set(); this.res = {}; this.raf = null;
+    $('#stage').innerHTML = `<div class="sortkeys">
+        <button class="btn sortbtn" data-b="0" style="background:#ff9f1c"><span class="k">⬅ ou Q</span>🔥 AU FOUR<small>les portraits 🖼️</small></button>
+        <button class="btn sortbtn" data-b="1" style="background:#3dd6ff"><span class="k">➡ ou D</span>📦 EN CAISSE<small>la ferraille 🔩⚙️🔧</small></button>
+      </div>
+      <div class="ucturn" id="fnow" style="margin:0 0 8px">Les objets arrivent…</div>
+      <div class="screen-dark"><canvas id="fc" width="820" height="300"></canvas></div>${legend()}
+      <p class="sub">Trie chaque objet quand il est dans la zone jaune. Oublier = −1.</p>`;
+    this.items = null; this.dec = new Map(); this.res = {}; this.raf = null;
+    $('#stage').querySelectorAll('.sortbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.sort(+b.dataset.b); }));
   },
   msg(m) {
     if (m.k === 'belt') { this.items = m.items; this.half = m.half; this.t0 = performance.now(); this.loop(); M.players.forEach((_, i) => legendSet(i, '0 pt')); }
     if (m.k === 'res') {
       this.res[m.idx] = m.res[M.me];
-      SFX.play(m.res[M.me] ? 'ok' : 'bad');
+      SFX.play(m.res[M.me] === 1 ? 'ok' : 'bad');
       m.s.forEach((v, i) => legendSet(i, `${v} pt${Math.abs(v) > 1 ? 's' : ''}`));
     }
   },
-  key(e) { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) this.burn(); } },
-  burn() {
-    if (!this.items || !active || dead) return;
+  key(e) {
+    if (e.repeat) return;
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); this.sort(0); }
+    else if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); this.sort(1); }
+  },
+  inZone() {
     const el = performance.now() - this.t0;
-    const k = this.items.findIndex((it, kk) => !this.burned.has(kk) && Math.abs(el - it.t) <= this.half + 60);
-    send({ t: 'input', a: 'burn' });
-    if (k >= 0) { this.burned.add(k); this.items[k].bt = el; SFX.play('whoosh'); }
+    return this.items.findIndex((it, k) => !this.dec.has(k) && Math.abs(el - it.t) <= this.half + 60);
+  },
+  sort(b) {
+    if (!this.items || !active || dead) return;
+    send({ t: 'input', a: 'sort', b });
+    const k = this.inZone();
+    if (k >= 0) { this.dec.set(k, { b, at: performance.now() - this.t0 }); SFX.play(b === 0 ? 'whoosh' : 'bonk'); }
   },
   loop() {
-    const cv = $('#fc'), c = cv.getContext('2d'), W = cv.width, ZX = 560, V = 60 / this.half;
+    const cv = $('#fc'), c = cv.getContext('2d'), W = cv.width, ZX = 520, V = 70 / this.half, BY = 165;
     const draw = () => {
       this.raf = requestAnimationFrame(draw);
       const el = performance.now() - this.t0;
-      c.fillStyle = '#14102e'; c.fillRect(0, 0, W, 280);
-      // four
-      const fl = c.createLinearGradient(0, 170, 0, 280); fl.addColorStop(0, '#ffd23f'); fl.addColorStop(0.5, '#ff9f1c'); fl.addColorStop(1, '#ff4d6d');
-      c.fillStyle = fl; c.fillRect(ZX - 60, 175, 120, 105);
-      for (let k = 0; k < 6; k++) { c.font = '26px serif'; c.textAlign = 'center'; c.fillText('🔥', ZX - 50 + k * 20, 270 - Math.abs(Math.sin(el / 120 + k)) * 18); }
+      c.fillStyle = '#14102e'; c.fillRect(0, 0, W, 300);
+      // caisse (au-dessus) et four (en dessous) de la zone
+      c.fillStyle = '#c98b4a'; c.strokeStyle = '#1b1440'; c.lineWidth = 3;
+      c.fillRect(ZX - 55, 6, 110, 52); c.strokeRect(ZX - 55, 6, 110, 52);
+      strokeText(c, '📦 CAISSE ➡', ZX, 38, '#fff', 15);
+      const fl = c.createLinearGradient(0, 205, 0, 300); fl.addColorStop(0, '#ffd23f'); fl.addColorStop(0.5, '#ff9f1c'); fl.addColorStop(1, '#ff4d6d');
+      c.fillStyle = fl; c.fillRect(ZX - 70, 205, 140, 95);
+      for (let k = 0; k < 7; k++) { c.font = '24px serif'; c.textAlign = 'center'; c.fillText('🔥', ZX - 60 + k * 20, 295 - Math.abs(Math.sin(el / 120 + k)) * 16); }
+      strokeText(c, '⬅ FOUR 🔥', ZX, 232, '#fff', 15);
       // tapis
-      c.fillStyle = '#3a3166'; c.fillRect(0, 150, ZX - 60, 26); c.fillRect(ZX + 60, 150, W - ZX - 60, 26);
+      c.fillStyle = '#3a3166'; c.fillRect(0, BY, W, 24);
       c.fillStyle = '#58508f';
       const off = (el * V) % 30;
-      for (let x = off - 30; x < W; x += 30) if (x < ZX - 64 || x > ZX + 60) c.fillRect(x, 155, 14, 16);
-      c.strokeStyle = '#ffd23f'; c.lineWidth = 3; c.setLineDash([8, 6]); c.strokeRect(ZX - 60, 40, 120, 136); c.setLineDash([]);
-      strokeText(c, 'ZONE', ZX, 32, '#ffd23f', 14);
+      for (let x = off - 30; x < W; x += 30) c.fillRect(x, BY + 4, 14, 16);
+      const zk = this.inZone();
+      c.strokeStyle = zk >= 0 ? '#ffd23f' : 'rgba(255,210,63,.45)'; c.lineWidth = zk >= 0 ? 5 : 3;
+      c.setLineDash([8, 6]); c.strokeRect(ZX - 70, 70, 140, 128); c.setLineDash([]);
       this.items.forEach((it, k) => {
-        let x = ZX + (el - it.t) * V, y = 130;
+        let x = ZX + (el - it.t) * V, y = BY - 10;
+        const d = this.dec.get(k);
+        if (d) {
+          const dt = el - d.at;
+          x = ZX + (d.at - it.t) * V;
+          y = d.b === 0 ? BY - 10 + dt * 0.4 : BY - 10 - dt * 0.4;
+          if (y > 300 || y < 20) { if (this.res[k] !== undefined) strokeText(c, this.res[k] === 1 ? '✔' : '✖', ZX + 90, BY - 40, this.res[k] === 1 ? '#2ee59d' : '#ff4d6d', 26); return; }
+        }
         if (x < -60 || x > W + 60) return;
-        if (it.bt !== undefined) { const d = el - it.bt; x = ZX + (it.bt - it.t) * V; y = 130 + d * 0.35; if (y > 290) return; }
-        c.font = '44px serif'; c.textAlign = 'center'; c.fillText(it.e, x, y);
-        strokeText(c, it.n, x, y + 22 > 150 ? 100 : y + 22, '#fff', 11);
-        if (this.res[k] !== undefined && it.bt === undefined && x > ZX + 60) strokeText(c, this.res[k] ? '✔' : '✖', x, 80, this.res[k] ? '#2ee59d' : '#ff4d6d', 22);
-        if (this.res[k] !== undefined && it.bt !== undefined) strokeText(c, this.res[k] ? '✔' : '✖', ZX, 80, this.res[k] ? '#2ee59d' : '#ff4d6d', 26);
+        c.font = '46px serif'; c.textAlign = 'center'; c.fillText(it.e, x, y);
+        if (!d) strokeText(c, it.n, x, y + 34 > BY + 40 ? BY + 44 : y - 52, '#fff', 12);
+        if (!d && this.res[k] !== undefined) strokeText(c, this.res[k] === 2 ? '⏰ oublié' : this.res[k] === 1 ? '✔' : '✖', x, y - 52, this.res[k] === 1 ? '#2ee59d' : '#ff4d6d', 16);
       });
+      const fnow = $('#fnow');
+      if (fnow) fnow.textContent = zk >= 0 ? `Dans la zone : ${this.items[zk].e} ${this.items[zk].n} → ${this.items[zk].e === '🖼️' ? '⬅ FOUR' : '➡ CAISSE'} ?` : ' ';
     };
     draw();
   },
@@ -803,80 +858,121 @@ GAMES.mines = {
 // ── Tron ──
 GAMES.tron = {
   init() {
-    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="tc"></canvas></div>${legend()}<p class="sub">Flèches ou ZQSD · ton point de départ est entouré de blanc</p>`;
+    $('#stage').innerHTML = `<div class="screen-dark" style="position:relative"><canvas id="tc"></canvas>
+      <canvas id="tco" style="position:absolute;left:8px;top:8px;width:calc(100% - 16px);height:calc(100% - 16px);pointer-events:none"></canvas></div>
+      ${legend()}<p class="sub">Flèches ou ZQSD · tu es la tête avec l'anneau blanc qui clignote</p>`;
     $('#stage').appendChild(dpad((d) => send({ t: 'input', a: 'dir', d })));
-    this.C = 14; this.prev = null;
+    this.C = 14; this.prev = null; this.heads = null; this.dead = new Set(); this.raf = null; this.started = false;
   },
-  cell(x, y, color, glow) {
+  cell(x, y, color, glow, mine) {
     const C = this.C, c = this.ctx;
     c.save();
     if (glow) { c.shadowColor = color; c.shadowBlur = 10; }
     c.fillStyle = color; c.fillRect(x * C + 1, y * C + 1, C - 2, C - 2);
+    if (mine) { c.shadowBlur = 0; c.strokeStyle = '#fff'; c.lineWidth = 2; c.strokeRect(x * C + 2, y * C + 2, C - 4, C - 4); }
     c.restore();
   },
   msg(m) {
     const C = this.C;
     if (m.k === 'tron') {
       const cv = $('#tc'); cv.width = m.w * C; cv.height = m.h * C;
+      const ov = $('#tco'); ov.width = cv.width; ov.height = cv.height;
+      this.w = m.w; this.h = m.h;
       const c = this.ctx = cv.getContext('2d');
       c.fillStyle = '#14102e'; c.fillRect(0, 0, cv.width, cv.height);
       c.strokeStyle = 'rgba(179,136,255,.08)'; c.lineWidth = 1;
       for (let x = 0; x <= m.w; x++) { c.beginPath(); c.moveTo(x * C + 0.5, 0); c.lineTo(x * C + 0.5, cv.height); c.stroke(); }
       for (let y = 0; y <= m.h; y++) { c.beginPath(); c.moveTo(0, y * C + 0.5); c.lineTo(cv.width, y * C + 0.5); c.stroke(); }
-      m.heads.forEach(([x, y], i) => {
-        this.cell(x, y, P(i).color, true);
-        c.font = `${C * 1.6}px serif`; c.textAlign = 'center'; c.fillText(P(i).avatar, x * C + C / 2, y * C - C * 0.6);
-      });
-      const [mx, my] = m.heads[M.me];
-      c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(mx * C + C / 2, my * C + C / 2, C * 1.4, 0, 7); c.stroke();
-      this.prev = m.heads;
+      m.heads.forEach(([x, y], i) => this.cell(x, y, P(i).color, true, i === M.me));
+      this.prev = m.heads; this.heads = m.heads;
+      this.loop();
     }
     if (m.k === 'tick') {
-      if (this.prev) this.prev.forEach((h, i) => { if (h) this.cell(h[0], h[1], P(i).color, true); });
+      this.started = true;
+      if (this.prev) this.prev.forEach((h, i) => { if (h) this.cell(h[0], h[1], P(i).color, true, i === M.me); });
       m.h.forEach((h, i) => {
         if (!h) return;
         if (m.d.includes(i)) {
+          this.dead.add(i);
           const c = this.ctx;
           c.font = `${C * 2.4}px serif`; c.textAlign = 'center'; c.fillText('💥', h[0] * C + C / 2, h[1] * C + C);
           legendSet(i, '💀');
         } else this.cell(h[0], h[1], '#ffffff', false);
       });
       this.prev = m.h.map((h, i) => (h && !m.d.includes(i) ? h : null));
+      this.heads = this.prev;
     }
   },
+  // calque redessiné à chaque image : avatars sur les têtes + gros repère clignotant sur toi
+  loop() {
+    const ov = $('#tco'), c = ov.getContext('2d'), C = this.C;
+    const draw = () => {
+      this.raf = requestAnimationFrame(draw);
+      c.clearRect(0, 0, ov.width, ov.height);
+      if (!this.heads) return;
+      const now = performance.now();
+      this.heads.forEach((h, i) => {
+        if (!h || this.dead.has(i)) return;
+        const x = h[0] * C + C / 2, y = h[1] * C + C / 2;
+        if (i === M.me) {
+          const r = C * (1.6 + 0.5 * Math.sin(now / 120));
+          c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x, y, r, 0, 7); c.stroke();
+          c.strokeStyle = P(i).color; c.lineWidth = 2; c.beginPath(); c.arc(x, y, r + 4, 0, 7); c.stroke();
+          const ly = y - C * 3.2 < 14 ? y + C * 3.6 : y - C * 3.2;
+          strokeText(c, '▼ TOI ▼', x, ly, '#fff', this.started ? 13 : 18);
+          if (!this.started) {
+            const dir = h[0] < this.w * 0.2 ? '➡' : h[0] > this.w * 0.8 ? '⬅' : h[1] < this.h * 0.2 ? '⬇' : '⬆';
+            strokeText(c, dir, x + (dir === '➡' ? C * 2.5 : dir === '⬅' ? -C * 2.5 : 0), y + (dir === '⬇' ? C * 2.8 : dir === '⬆' ? -C * 1.8 : 6), '#ffd23f', 26);
+          }
+        }
+        c.font = `${C * 1.3}px serif`; c.textAlign = 'center';
+        c.fillText(P(i).avatar, x, y - C * 0.9);
+      });
+    };
+    draw();
+  },
+  stop() { cancelAnimationFrame(this.raf); },
   key(e) { const d = DIRK[e.code]; if (d) { e.preventDefault(); send({ t: 'input', a: 'dir', d }); } },
 };
 
 // ── Mémoire ──
 GAMES.memory = {
   init() {
-    $('#stage').innerHTML = `<div class="lvl" id="mlvl">Niveau 1</div><div class="mgrid" id="mg">${range(25).map((c) => `<button data-c="${c}"></button>`).join('')}</div>
+    $('#stage').innerHTML = `<div class="lvl" id="mlvl">Niveau 1</div><div class="tbar" style="margin-bottom:12px;max-width:360px"><div id="mbar" style="width:0"></div></div>
+      <div class="mgrid" id="mg">${range(25).map((c) => `<button data-c="${c}"></button>`).join('')}</div>
       <p class="sub" id="minfo"></p>${legend()}`;
-    this.phase = 'idle'; this.alive = M.players.map(() => true); this.doneMe = false;
+    this.phase = 'idle'; this.alive = M.players.map(() => true); this.doneMe = false; this.timers = []; this.len = 0;
     $('#mg').addEventListener('pointerdown', (e) => {
       const b = e.target.closest('button'); if (!b) return;
-      if (this.phase !== 'input' || dead || this.doneMe || b.classList.contains('ok')) return;
+      if (this.phase !== 'input' || dead || this.doneMe) return;
       send({ t: 'input', a: 'tap', c: +b.dataset.c });
     });
   },
   btns() { return document.querySelectorAll('#mg button'); },
+  flash(c, cls, ms, txt) {
+    const b = this.btns()[c]; if (!b) return;
+    b.classList.add(cls); if (txt) b.textContent = txt;
+    this.timers.push(setTimeout(() => { b.classList.remove(cls); b.textContent = ''; }, ms));
+  },
   msg(m) {
     if (m.k === 'show') {
+      this.stop();
       this.phase = 'show'; this.doneMe = false; this.alive = m.alive;
-      $('#mlvl').textContent = `Niveau ${m.level} · ${m.cells.length} cases`;
+      $('#mlvl').textContent = `Niveau ${m.level} · séquence de ${m.seq.length}`;
       this.btns().forEach((b) => { b.className = ''; b.textContent = ''; });
-      m.cells.forEach((c, k) => setTimeout(() => { const b = this.btns()[c]; if (this.phase === 'show') { b.classList.add('lit'); b.textContent = '⭐'; } }, k * 40));
-      $('#minfo').textContent = '👀 Mémorise !';
+      $('#minfo').textContent = "👀 Regarde bien l'ordre…";
       $('#mg').classList.toggle('off', !m.alive[M.me]);
+      $('#mbar').style.width = '0';
+      m.seq.forEach((c, k) => this.timers.push(setTimeout(() => { this.flash(c, 'lit', m.on, '⭐'); SFX.play('tick'); }, k * (m.on + m.off))));
       this.legend();
     }
     if (m.k === 'input') {
-      this.phase = 'input';
-      this.btns().forEach((b) => { b.classList.remove('lit'); b.textContent = ''; });
-      $('#minfo').textContent = dead ? '👻 Tu regardes…' : '👆 À toi : reclique toutes les cases !';
+      this.phase = 'input'; this.len = m.len;
+      $('#minfo').textContent = dead ? '👻 Tu regardes…' : `👆 À toi, dans l'ordre ! (0 / ${m.len})`;
+      timerBar($('#mbar'), m.ms);
     }
-    if (m.k === 'ok') { const b = this.btns()[m.c]; b.classList.add('ok'); b.textContent = '✔'; SFX.play('ok'); }
-    if (m.k === 'bad') { const b = this.btns()[m.c]; b.classList.add('bad'); b.textContent = '✖'; SFX.play('bad'); }
+    if (m.k === 'ok') { this.flash(m.c, 'ok', 260, '✔'); SFX.play('ok'); if (!this.doneMe) $('#minfo').textContent = `👆 Dans l'ordre ! (${m.p} / ${this.len})`; }
+    if (m.k === 'bad') { this.flash(m.c, 'bad', 1500, '✖'); SFX.play('bad'); }
     if (m.k === 'st') {
       this.alive = m.alive;
       if (m.done[M.me] && !this.doneMe) { this.doneMe = true; $('#minfo').textContent = '✅ Parfait ! On attend les autres…'; }
@@ -884,26 +980,19 @@ GAMES.memory = {
     }
   },
   legend(done) { M.players.forEach((_, i) => legendSet(i, !this.alive[i] ? '💀' : done && done[i] ? '✅' : '')); },
+  stop() { (this.timers || []).forEach(clearTimeout); this.timers = []; },
 };
 
 // ── Esquive ──
 GAMES.dodge = {
   init() {
-    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="dc" width="800" height="500"></canvas></div>${legend()}<p class="sub">Flèches ou ZQSD · ton perso a un contour blanc · les scies en pointillés ne coupent pas encore</p>`;
-    this.held = new Set(); this.S = {}; this.raf = null; this.lastV = '0,0';
-    $('#stage').appendChild(dpad((d) => { this.held.add(d); this.sendMv(); }, (d) => { this.held.delete(d); this.sendMv(); }));
+    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="dc" width="800" height="500"></canvas></div>${legend()}<p class="sub">Flèches ou ZQSD · ESPACE pour bousculer · contour blanc = toi · les scies en pointillés ne coupent pas encore</p>`;
+    this.S = {}; this.raf = null;
+    mover(this, true);
   },
-  sendMv() {
-    const h = this.held;
-    const x = (h.has('right') ? 1 : 0) - (h.has('left') ? 1 : 0), y = (h.has('down') ? 1 : 0) - (h.has('up') ? 1 : 0);
-    const v = x + ',' + y;
-    if (v !== this.lastV) { this.lastV = v; send({ t: 'input', a: 'mv', x, y }); }
-  },
-  key(e) { const d = DIRK[e.code]; if (d) { e.preventDefault(); if (!e.repeat) { this.held.add(d); this.sendMv(); } } },
-  keyup(e) { const d = DIRK[e.code]; if (d) { this.held.delete(d); this.sendMv(); } },
-  blur() { this.held.clear(); this.sendMv(); },
   msg(m) {
     if (m.k === 'dodge') { this.W = m.w; this.H = m.h; this.PR = m.pr; this.loop(); }
+    if (m.k === 'shove' && this.S.cur) { const q = this.S.cur.d.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
     if (m.k === 's') {
       const before = this.S.cur ? this.S.cur.d.p : null;
       pushSnap(this.S, m);
@@ -952,6 +1041,7 @@ GAMES.dodge = {
         c.font = '16px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, x, y + 6);
         strokeText(c, P(i).name, x, y - PR - 9, P(i).color, 12);
       });
+      drawFx(c, this);
       strokeText(c, `⏱ ${B.tm.toFixed(1)} s`, 52, 28, '#fff', 18);
     };
     draw();
@@ -1045,7 +1135,7 @@ GAMES.undercover = {
   init() {
     $('#stage').innerHTML = `<div class="secret" id="ucw"><span>Distribution des mots…</span></div>
       <div class="ucturn" id="uct"></div><div class="tbar"><div id="ucbar" style="width:0"></div></div>
-      <div class="ucin hidden" id="ucin"><input id="ucclue" maxlength="24" placeholder="Ton indice…" autocomplete="off">
+      <div class="ucin hidden" id="ucin"><input id="ucclue" maxlength="20" placeholder="Un seul mot…" autocomplete="off">
         <button class="btn blue" id="ucsend">💬 Indice</button><button class="btn pink hidden" id="ucguess">🎯 Deviner son mot</button></div>
       <div class="uclist" id="ucl"></div><p class="sub" id="ucsub">Débattez en vocal avant de voter !</p>`;
     const n = M.players.length;
@@ -1065,9 +1155,11 @@ GAMES.undercover = {
     switch (m.k) {
       case 'word':
         this.duel = !!m.duel;
-        $('#ucw').innerHTML = `<span>Ton mot secret</span><b>${esc(m.word)}</b><span>${this.duel
+        this.word = m.word;
+        this.wordNote = this.duel
           ? "Ton adversaire a un mot proche du tien. Trouve-le avant qu'il trouve le tien !"
-          : `${m.nu > 1 ? m.nu + ' undercovers' : '1 undercover'} dans la partie… c'est peut-être toi 😏`}</span>`;
+          : `${m.nu > 1 ? m.nu + ' undercovers' : '1 undercover'} dans la partie… c'est peut-être toi 😏`;
+        this.renderWord();
         $('#uct').textContent = 'Lisez bien vos mots…';
         $('#ucsub').textContent = this.duel ? 'À ton tour : un indice OU une tentative (2 essais max). Attention, tes indices l\'aident aussi !' : 'Débattez en vocal avant de voter !';
         $('#ucguess').classList.toggle('hidden', !this.duel);
@@ -1113,6 +1205,16 @@ GAMES.undercover = {
         this.render();
         break;
     }
+  },
+  renderWord() {
+    let hidden = false;
+    try { hidden = localStorage.getItem('clutch-uc-hide') === '1'; } catch {}
+    $('#ucw').innerHTML = `<span>Ton mot secret</span><b>${hidden ? '••••••' : esc(this.word)}</b><span>${esc(this.wordNote)}</span>
+      <div style="margin-top:8px"><button class="btn sm white" id="uchide">${hidden ? '👁️ Afficher mon mot' : '🙈 Cacher mon mot'}</button></div>`;
+    $('#uchide').onclick = () => {
+      try { localStorage.setItem('clutch-uc-hide', hidden ? '0' : '1'); } catch {}
+      this.renderWord();
+    };
   },
   render() {
     const el = $('#ucl'); if (!el) return;
