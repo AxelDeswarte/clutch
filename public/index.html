@@ -88,6 +88,8 @@
   .pl .av { font-size: 26px; }
   .pl .nm { flex: 1; font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pl.me { background: #fff3c4; }
+  .pl.bot { border-style: dashed; background: #f4f1ff; }
+  .addbot { display: block; margin: 10px auto 0; }
   .teamcol { border: 3px solid var(--line); border-radius: 18px; padding: 10px; margin-bottom: 10px; }
   .teamcol h4 { font-family: var(--display); margin: 0 0 8px; font-size: 18px; display: flex; justify-content: space-between; align-items: center; }
   .empty { padding: 10px; border: 2.5px dashed rgba(27,20,64,.35); border-radius: 14px; text-align: center; color: var(--mut); font-size: 14px; }
@@ -135,12 +137,31 @@
   .fchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border: 2.5px solid var(--line); border-radius: 999px; font-weight: 900; font-size: 15px; }
   .fchip .av { width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 17px; }
   .fchip b { font-family: var(--display); font-size: 20px; background: #fff; border: 2px solid var(--line); border-radius: 8px; padding: 0 7px; }
-  .fchip.me { outline: 3px solid #fff; outline-offset: 1px; }
+  .fchip.me { outline: 3px solid #fff; outline-offset: 1px; box-shadow: 0 0 0 6px var(--line); }
+  .fchip small { font-size: 12px; font-weight: 800; }
+  .fchip b small { font-size: 12px; color: var(--mut); }
+  .fchip .rk { font-family: var(--display); font-size: 14px; min-width: 18px; text-align: center; }
+  .fchip.lead { transform: scale(1.06); }
+  .sbscore .pts1 { font-size: 11px; color: var(--mut); }
+  /* score du match (règles, fin de manche) */
+  .mscore { margin: 14px auto 0; max-width: 560px; }
+  .mscore .lbl { justify-content: center; margin-bottom: 6px; }
+  .mscore .lbl .mut { text-transform: none; letter-spacing: 0; font-family: var(--body); }
+  .mrow { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .mchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border: 2.5px solid var(--line); border-radius: 999px; font-weight: 900; font-size: 15px; }
+  .mchip b { font-family: var(--display); font-size: 18px; background: #fff; border: 2px solid var(--line); border-radius: 8px; padding: 0 7px; }
+  .mchip i { font-style: normal; font-family: var(--display); color: #fff; background: var(--green); border: 2px solid var(--line); border-radius: 8px; padding: 0 6px; animation: pop .4s .3s backwards; }
+  .mchip.me { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--line); }
+  .standings > div.lbl { justify-content: center; margin: 0 0 2px; background: none; border: 0; padding: 0; }
   .bump { animation: bump .5s; }
   @keyframes bump { 30% { transform: scale(1.4) rotate(-6deg); } }
 
   #arena { position: relative; min-height: 470px; padding: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
   #stage { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  /* rappel permanent du jeu en cours et de son but */
+  #gamehdr { align-self: stretch; text-align: center; font-size: 14px; color: var(--ink2); margin: -6px 0 10px; padding-bottom: 8px; border-bottom: 2px dashed rgba(27,20,64,.15); }
+  #gamehdr:empty { display: none; }
+  #gamehdr b { font-family: var(--display); font-size: 17px; color: var(--ink); }
   .screen-dark { background: var(--screen); border: 3px solid var(--line); border-radius: 16px; padding: 8px; box-shadow: inset 0 0 0 3px #2c2560; max-width: 100%; }
   canvas { max-width: 100%; height: auto; border-radius: 10px; display: block; }
   .sub { color: var(--mut); font-size: 14px; margin: 12px 0 0; text-align: center; }
@@ -183,8 +204,9 @@
   #ovGag { margin-top: 10px; }
   #gagLayer { position: absolute; inset: 0; z-index: 5; background: rgba(255,248,236,.94); display: flex; align-items: center; justify-content: center; padding: 16px; }
   #gagLayer .gwrap { width: 100%; max-width: 640px; }
-  .youdead { position: absolute; top: 10px; left: 50%; transform: translateX(-50%) rotate(-2deg); z-index: 4; background: var(--red); color: #fff;
-    border: 3px solid var(--line); padding: 4px 14px; border-radius: 12px; font-family: var(--display); font-size: 16px; pointer-events: none; box-shadow: 0 3px 0 var(--line); }
+  /* en coin, pour ne pas masquer la consigne du jeu */
+  .youdead { position: absolute; top: 8px; right: 10px; transform: rotate(2deg); z-index: 4; background: var(--red); color: #fff;
+    border: 3px solid var(--line); padding: 3px 12px; border-radius: 12px; font-family: var(--display); font-size: 14px; pointer-events: none; box-shadow: 0 3px 0 var(--line); }
   .corner { position: fixed; bottom: 12px; right: 12px; z-index: 40; }
   .corner .btn { padding: 6px 10px; font-size: 20px; }
 
@@ -553,6 +575,7 @@
   <section id="game" class="screen hidden">
     <header id="scorebar" class="card"></header>
     <div id="arena" class="card">
+      <div id="gamehdr"></div>
       <div id="stage"></div>
       <div id="gagLayer" class="hidden"><div class="gwrap"></div></div>
     </div>

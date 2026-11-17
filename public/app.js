@@ -149,7 +149,7 @@ function renderReady(list) {
   if (!M) return;
   const box = $('#ovReady');
   if (!box.querySelector('.readyrow')) {
-    box.innerHTML = `<div class="readyrow"></div>
+    box.innerHTML = `<div class="lbl" style="justify-content:center;margin:14px 0 6px">✋ Qui est prêt ?</div><div class="readyrow"></div>
       <button class="btn big green" id="btnReady" type="button">✅ J'ai lu, prêt ! <span style="font-size:14px">(Espace / Entrée)</span></button>
       <p class="mut hidden" id="readyWait"></p>`;
     const b = $('#btnReady');
@@ -241,13 +241,31 @@ function renderScore() {
       ${M.teams ? `<div class="sbmem">${M.sides[s].map((i) => pill(i)).join('')}</div>` : ''}</div>`;
     sb.innerHTML = `${side(0)}<div class="sbscore"><div class="big"><span id="sc0">${scores[0]}</span> – <span id="sc1">${scores[1]}</span></div><div class="rnd">${rnd}</div></div>${side(1, true)}`;
   } else {
+    // chacun pour soi : classement trié, rang + points (et objectif en mode points)
     const best = Math.max(...scores);
-    sb.innerHTML = `<div class="ffachips">${M.players.map((p, i) => `<span class="fchip ${i === M.me ? 'me' : ''}" style="background:${p.color}">
-      <span class="av">${esc(p.avatar)}</span>${best > 0 && scores[i] === best ? '👑 ' : ''}${esc(p.name)} <b id="sc${i}">${scores[i]}</b></span>`).join('')}</div>
-      <div class="sbscore"><div class="rnd">${rnd}</div></div>`;
+    const order = range(scores.length).sort((a, b) => scores[b] - scores[a] || a - b);
+    sb.innerHTML = `<div class="ffachips">${order.map((i) => {
+      const p = P(i), rank = 1 + scores.filter((v) => v > scores[i]).length, lead = best > 0 && scores[i] === best;
+      return `<span class="fchip ${i === M.me ? 'me' : ''} ${lead ? 'lead' : ''}" style="background:${p.color}">
+      <span class="rk">${lead ? '👑' : rank}</span><span class="av">${esc(p.avatar)}</span>${esc(p.name)}${i === M.me ? ' <small>(toi)</small>' : ''}
+      <b id="sc${i}">${scores[i]}${M.byPoints ? `<small>/${M.target}</small>` : ''}</b></span>`;
+    }).join('')}</div>
+      <div class="sbscore"><div class="rnd">${rnd}</div><div class="pts1">1 pt par manche gagnée</div></div>`;
   }
   scores.forEach((s, i) => { if (prevScores[i] !== undefined && s > prevScores[i]) bump($('#sc' + i)); });
   prevScores = [...scores];
+}
+
+// score du match en une ligne (écran de règles et fin de manche) ; `gained` = points marqués à l'instant
+function matchScoreHTML(gained) {
+  if (!M) return '';
+  const order = range(scores.length).sort((a, b) => scores[b] - scores[a] || a - b);
+  const goal = M.byPoints ? `premier à ${M.target} pt${M.target > 1 ? 's' : ''}` : decisive ? 'manche décisive' : `après ${roundNo} manche${roundNo > 1 ? 's' : ''} sur ${M.maxRounds}`;
+  return `<div class="mscore"><div class="lbl">🏆 Score du match <span class="mut">· ${goal}</span></div><div class="mrow">${order.map((s) => {
+    const mine = M.sides[s].includes(M.me);
+    const who = M.teams ? esc(sideLabel(s)) : `${esc(P(M.sides[s][0]).avatar)} ${esc(sideLabel(s))}`;
+    return `<span class="mchip ${mine ? 'me' : ''}" style="background:${sideColor(s)}">${who}${mine && !M.teams ? ' (toi)' : ''} <b>${scores[s]}</b>${gained && gained[s] ? '<i>+1</i>' : ''}</span>`;
+  }).join('')}</div></div>`;
 }
 
 // ════════════════ salon ════════════════
@@ -272,10 +290,13 @@ function renderLobby() {
   $('#lobbyResult').textContent = r.lastResult || '';
   const isTeam = r.mode === '2v2' || r.mode === '3v3';
   const canAdd = (m) => me && m.uid && m.uid !== me.id && friendsData && !friendsData.friends.some((f) => f.id === m.uid) && !friendsData.reqOut.some((f) => f.id === m.uid);
-  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''} ${m.offline ? 'off' : ''}"><span class="av fr-${m.frame || 'classic'}" style="--pc:#ffd23f">${esc(m.avatar)}</span>
-    <span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}${m.level ? ` <span class="lv">${m.level}</span>` : ' <span class="mut" style="font-size:11px">invité</span>'}
+  const botTools = (m) => (host && m.bot ? `${isTeam ? `<button class="btn sm white" data-botteam="${m.id}" data-to="${1 - m.team}" title="Changer d'équipe">⇄</button>` : ''}<button class="btn sm white" data-delbot="${m.id}" title="Retirer ce bot">✖</button>` : '');
+  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''} ${m.offline ? 'off' : ''} ${m.bot ? 'bot' : ''}"><span class="av fr-${m.frame || 'classic'}" style="--pc:#ffd23f">${esc(m.avatar)}</span>
+    <span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}${m.bot ? ' <span class="mut" style="font-size:11px">bot</span>' : m.level ? ` <span class="lv">${m.level}</span>` : ' <span class="mut" style="font-size:11px">invité</span>'}
     ${m.title ? `<small class="ptitle">${esc(COSMETICS.titleName(m.title))}</small>` : ''}</span>
-    ${m.offline ? '<span title="Déconnecté, on l\'attend">🔌</span>' : ''}${canAdd(m) ? `<button class="btn sm white" data-addfriend="${esc(m.name)}" title="Ajouter en ami">➕</button>` : ''}${m.id === r.host ? '👑' : ''}</div>`;
+    ${m.offline ? '<span title="Déconnecté, on l\'attend">🔌</span>' : ''}${canAdd(m) ? `<button class="btn sm white" data-addfriend="${esc(m.name)}" title="Ajouter en ami">➕</button>` : ''}${botTools(m)}${m.id === r.host ? '👑' : ''}</div>`;
+  const full = r.members.length >= 10;
+  const addBot = host ? `<button class="btn sm white addbot" data-addbot="1" ${full ? 'disabled' : ''}>🤖 Ajouter un bot</button>` : '';
   if (isTeam) {
     const size = r.mode === '2v2' ? 2 : 3;
     $('#teams').innerHTML = [0, 1].map((t) => {
@@ -283,11 +304,12 @@ function renderLobby() {
       return `<div class="teamcol" style="background:${TEAMC[t]}33"><h4><span>${t === 0 ? '🔵' : '🩷'} ${TEAMN[t]} <span class="mut">${mem.length}/${size}</span></span>
         ${meM && meM.team !== t ? `<button class="btn white sm" data-team="${t}">Rejoindre</button>` : ''}</h4>
         <div class="plist">${mem.map(row).join('') || '<div class="empty">Personne pour l\'instant</div>'}</div></div>`;
-    }).join('');
+    }).join('') + addBot;
   } else {
-    $('#teams').innerHTML = `<div class="plist">${r.members.map(row).join('')}</div>`;
+    $('#teams').innerHTML = `<div class="plist">${r.members.map(row).join('')}</div>${addBot}`;
   }
   $('#count').textContent = `${r.members.length}/10`;
+  const bots = r.members.some((m) => m.bot);
   $('#modes').innerHTML = r.modes.map((m) => { const u = MODE_UI[m.key]; return `<div class="mode ${m.key === r.mode ? 'on' : ''}" data-mode="${m.key}"><span class="i">${u[0]}</span><b>${u[1]}</b><small>${u[2]}</small></div>`; }).join('');
   const pts = r.goal === 'points';
   const N = pts ? r.target : r.rounds;
@@ -304,9 +326,9 @@ function renderLobby() {
         ? `Best of ${N} : le premier à <b>${pl(Math.floor(N / 2) + 1, 'manche')}</b> gagnée${Math.floor(N / 2) + 1 > 1 ? 's' : ''} l'emporte. Égalité = manche décisive.`
         : `${pl(N, 'manche')} · 1 point au gagnant de chaque manche · le plus de points gagne (fin anticipée si c'est plié). Égalité = manche décisive.`}</div>`;
   $('#gamesList').innerHTML = r.games.map((g) => {
-    const out = isTeam && !g.team;
-    return `<button class="gcard ${g.on && !out ? 'on' : ''} ${out ? 'noteam' : ''}" data-game="${g.key}" ${out ? 'disabled title="Pas jouable en équipe"' : ''}>
-    <span class="tick">${out ? '—' : g.on ? '✔' : '✖'}</span><span class="i">${g.icon}</span><b>${esc(g.title)}${g.team ? ' <span title="Jouable en équipe">👥</span>' : ''}</b><small>${out ? 'Pas en équipe' : esc(g.desc)}</small></button>`;
+    const why = isTeam && !g.team ? 'Pas en équipe' : bots && g.noBots ? 'Pas avec des bots' : '';
+    return `<button class="gcard ${g.on && !why ? 'on' : ''} ${why ? 'noteam' : ''}" data-game="${g.key}" ${why ? `disabled title="${why}"` : ''}>
+    <span class="tick">${why ? '—' : g.on ? '✔' : '✖'}</span><span class="i">${g.icon}</span><b>${esc(g.title)}${g.team ? ' <span title="Jouable en équipe">👥</span>' : ''}</b><small>${why || esc(g.desc)}</small></button>`;
   }).join('');
   ['#modes', '#rounds', '#gamesList'].forEach((s) => $(s).classList.toggle('nohost', !host));
   $('#btnStart').classList.toggle('hidden', !host);
@@ -342,9 +364,11 @@ function onMsg(m) {
       roundNo = m.round; decisive = m.decisive; scores = m.scores; renderScore();
       cur = GAMES[m.game]; active = false; dead = false;
       $('#stage').innerHTML = '';
+      setGameHeader(m.game, m.icon, m.title);
       cur.init();
       overlay({ icon: m.icon, title: m.title, text: m.rules, badge: m.decisive ? '⚡ MANCHE DÉCISIVE ⚡' : M.byPoints ? `Manche ${m.round} · premier à ${M.target} pts` : `Manche ${m.round} / ${m.maxRounds}`, keys: m.keys, touch: m.touch, teamRule: m.teamRule });
       introOpen = true; readySent = false;
+      if (m.round > 1) $('#ovList').innerHTML = matchScoreHTML();
       renderReady(m.ready);
       break;
     case 'readyState':
@@ -409,6 +433,7 @@ function resync(m) {
   if (!m.intro) return;
   cur = GAMES[m.intro.game]; active = false; dead = false;
   $('#stage').innerHTML = '';
+  setGameHeader(m.intro.game, m.intro.icon, m.intro.title);
   cur.init();
   if (m.state === 'intro') {
     onMsg({ ...m.intro, ready: m.ready });
@@ -424,6 +449,10 @@ function resync(m) {
 }
 
 function stopGame() { if (cur && cur.stop) { try { cur.stop(); } catch {} } }
+function setGameHeader(key, icon, title) {
+  const g = CATALOG.find((x) => x.key === key);
+  $('#gamehdr').innerHTML = key ? `${esc(icon)} <b>${esc(title)}</b>${g ? ` — ${esc(g.desc)}` : ''}` : '';
+}
 
 function onElim(m) {
   if (!M) return;
@@ -450,7 +479,7 @@ function onElim(m) {
 
 function standingsHTML(m) {
   const order = range(M.players.length).sort((a, b) => m.ranks[a] - m.ranks[b]);
-  return `<div class="standings">${order.map((i, k) => {
+  return `<div class="standings"><div class="lbl">📋 Classement de la manche</div>${order.map((i, k) => {
     const g = M.sides.length > 2 ? m.gained[P(i).side] : 0;
     const r = m.ranks[i];
     return `<div style="animation-delay:${k * 0.08}s"><span class="medal">${MEDALS[r - 1] || r + '.'}</span>${pill(i)}${g ? `<span class="pts">+${g}</span>` : ''}</div>`;
@@ -475,7 +504,7 @@ function showRoundEnd(m) {
     const capName = m.losers.length === 1 ? names : M.teams && sameSide ? `L'${sideLabel(P(m.losers[0]).side)}` : `La bande à ${P(m.losers[0]).name}`;
     setTimeout(() => { if (!$('#overlay').classList.contains('hidden')) playGag($('#ovGag'), { name: names, capName, color: P(m.losers[0]).color, other: P(m.o).name, r: m.r }); }, 700);
   }
-  $('#ovList').innerHTML = standingsHTML(m);
+  $('#ovList').innerHTML = standingsHTML(m) + matchScoreHTML(m.gained);
 }
 
 function showMatchEnd(m) {
@@ -702,7 +731,7 @@ GAMES.filter = {
       </div>
       <div class="ucturn" id="fnow" style="margin:0 0 8px">Le tapis démarre…</div><div class="tbar" style="margin-bottom:10px"><div id="fbar" style="width:0"></div></div>
       <div class="screen-dark"><canvas id="fc" width="820" height="280"></canvas></div>${legend()}
-      <p class="sub">40 secondes, tapis infini. Erreur = sonné 1,5 s.</p>`;
+      <p class="sub">30 secondes, tapis infini. Erreur = une vie ❤️ en moins + sonné 1,5 s. Ce qui compte : le nombre d'objets triés.</p>`;
     this.items = null; this.pos = 0; this.stunUntil = 0; this.anims = []; this.slideT = 0; this.raf = null; this.out = false; this.cnt = [];
     $('#stage').querySelectorAll('.sortbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.sort(+b.dataset.b); }));
   },
@@ -765,7 +794,7 @@ GAMES.filter = {
       c.fillStyle = '#c98b4a'; c.strokeStyle = '#1b1440'; c.lineWidth = 3;
       c.fillRect(ZX + 110, 14, 150, 62); c.strokeRect(ZX + 110, 14, 150, 62);
       c.beginPath(); c.moveTo(ZX + 110, 45); c.lineTo(ZX + 260, 45); c.stroke();
-      strokeText(c, 'CAISSE (tableaux) ➡', ZX + 185, 38, '#fff', 14);
+      strokeText(c, 'CAISSE (valeur) ➡', ZX + 185, 38, '#fff', 14);
       // tapis : les objets arrivent par la gauche et glissent d'un cran vers la zone de tri à chaque tri
       const slide = Math.max(0, 1 - (now - this.slideT) / 160);
       const ease = slide * slide;
@@ -809,35 +838,74 @@ GAMES.filter = {
 GAMES.floor = {
   init() {
     $('#stage').innerHTML = `<div class="ucturn" id="flt" style="margin-top:0">Prépare-toi…</div><div class="tbar" style="margin-bottom:10px"><div id="flbar" style="width:0"></div></div>
-      <div class="screen-dark"><canvas id="flc" width="640" height="480"></canvas></div>${legend()}<p class="sub">Flèches / ZQSD pour bouger · ESPACE pour bousculer</p>`;
+      <div class="screen-dark"><canvas id="flc" width="640" height="480"></canvas></div>${legend()}
+      <p class="sub">Flèches / ZQSD pour bouger · ESPACE pour bousculer · ton rond 🟢 = tu es sur une bonne dalle, 🔴 = tu vas tomber</p>`;
     mover(this, true);
-    this.S = {}; this.tiles = null; this.holes = false; this.raf = null;
+    this.S = {}; this.tiles = null; this.holes = false; this.raf = null; this.crack = []; this.warnEnd = 0; this.warnMs = 1; this.falls = []; this.dropT = 0;
   },
   msg(m) {
     if (m.k === 'floor') { Object.assign(this, { W: m.w, H: m.h, C: m.c, R: m.r, T: m.tile, sym: m.sym, PR: m.pr }); this.loop(); }
-    if (m.k === 'ph') { this.tiles = m.tiles; this.target = m.target; this.holes = false; $('#flt').innerHTML = `Va sur <span style="font-size:34px">${this.sym[m.target]}</span> !`; timerBar($('#flbar'), m.ms); SFX.play('ding'); }
-    if (m.k === 'drop') { this.holes = true; $('#flt').textContent = '💥 EFFONDREMENT !'; SFX.play('boom'); }
-    if (m.k === 'restore') this.holes = false;
+    if (m.k === 'ph') {
+      this.tiles = m.tiles; this.target = m.target; this.holes = false; this.crack = m.crack || [];
+      this.warnMs = m.ms; this.warnEnd = performance.now() + m.ms;
+      $('#flt').innerHTML = `Va sur une dalle <span style="font-size:34px;vertical-align:middle">${this.sym[m.target]}</span> !${this.crack.length ? ' <small style="font-size:15px">· les dalles fissurées ⚠️ vont tomber</small>' : ''}`;
+      timerBar($('#flbar'), m.ms); SFX.play('ding');
+    }
+    if (m.k === 'drop') { this.holes = true; this.dropT = performance.now(); $('#flt').textContent = '💥 EFFONDREMENT ! Seules les dalles ' + this.sym[this.target] + ' tiennent'; SFX.play('boom'); }
+    if (m.k === 'restore') { this.holes = false; (this.crack || []).forEach((k) => { this.tiles[k] = -1; }); this.crack = []; $('#flt').textContent = 'Le sol revient… prochain symbole dans un instant'; }
     if (m.k === 'shove' && this.S.cur) { const q = this.S.cur.d.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
-    if (m.k === 's') { if (this.S.cur) m.p.forEach((p, i) => { if (!p[2] && this.S.cur.d.p[i][2]) legendSet(i, '💀'); }); pushSnap(this.S, m); }
+    // chute : on marque l'endroit, pour que tout le monde comprenne qui est tombé et où
+    if (m.k === 'fall') {
+      this.falls.push({ x: m.x, y: m.y, i: m.i, t: performance.now() });
+      fxText(this, m.x, m.y - 26, m.i === M.me ? 'TU TOMBES !' : `${P(m.i).name} tombe !`, '#ff4d6d');
+      legendSet(m.i, '🕳️ tombé');
+    }
+    if (m.k === 's') pushSnap(this.S, m);
   },
   loop() {
     const c = $('#flc').getContext('2d');
     const draw = () => {
       this.raf = requestAnimationFrame(draw);
       const S = this.S; if (!S.cur) return;
-      const T = this.T;
+      const T = this.T, now = performance.now();
+      const warn = this.tiles && !this.holes ? Math.max(0, Math.min(1, 1 - (this.warnEnd - now) / this.warnMs)) : 0; // 0 → 1 pendant l'alerte
+      const safe = (id) => this.tiles && this.tiles[id] === this.target && !this.crack.includes(id);
       c.fillStyle = '#05030f'; c.fillRect(0, 0, this.W, this.H);
       for (let r = 0; r < this.R; r++) for (let k = 0; k < this.C; k++) {
         const id = r * this.C + k, v = this.tiles ? this.tiles[id] : 0;
-        if (v === -1 || (this.holes && v !== this.target)) continue;
-        const good = this.tiles && v === this.target;
+        if (v === -1) continue;
+        const good = safe(id), cracked = this.crack.includes(id);
+        if (this.holes && !good) {
+          // la dalle tombe : elle rétrécit dans le vide
+          const f = Math.max(0, 1 - (now - this.dropT) / 350);
+          if (f <= 0) continue;
+          const s = (T - 6) * f, o = (T - s) / 2;
+          c.globalAlpha = f; c.fillStyle = '#6d6590'; c.fillRect(k * T + o, r * T + o, s, s); c.globalAlpha = 1;
+          continue;
+        }
         c.fillStyle = good ? '#fff3c4' : (r + k) % 2 ? '#b9b2d6' : '#cfc8ea';
         c.fillRect(k * T + 3, r * T + 3, T - 6, T - 6);
-        c.strokeStyle = '#1b1440'; c.lineWidth = 3; c.strokeRect(k * T + 3, r * T + 3, T - 6, T - 6);
-        if (this.tiles) { c.font = '30px serif'; c.textAlign = 'center'; c.globalAlpha = good ? 1 : 0.55; c.fillText(this.sym[v], k * T + T / 2, r * T + T / 2 + 11); c.globalAlpha = 1; }
+        // les dalles condamnées rougissent à mesure que la barre se vide
+        if (this.tiles && !good && warn > 0) { c.fillStyle = `rgba(255,77,109,${0.55 * warn})`; c.fillRect(k * T + 3, r * T + 3, T - 6, T - 6); }
+        c.strokeStyle = good ? '#2ee59d' : cracked ? '#ff4d6d' : '#1b1440'; c.lineWidth = good || cracked ? 4 : 3;
+        c.strokeRect(k * T + 3, r * T + 3, T - 6, T - 6);
+        if (cracked) {
+          c.strokeStyle = '#1b1440'; c.lineWidth = 2; c.beginPath();
+          c.moveTo(k * T + 12, r * T + 14); c.lineTo(k * T + 34, r * T + 36); c.lineTo(k * T + 28, r * T + 52); c.lineTo(k * T + 62, r * T + 68); c.stroke();
+          c.font = '18px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('⚠️', k * T + T - 16, r * T + 22);
+        }
+        if (this.tiles) { c.font = '30px ' + EMOJI_FONT; c.textAlign = 'center'; c.globalAlpha = good ? 1 : 0.5; c.fillText(this.sym[v], k * T + T / 2, r * T + T / 2 + 11); c.globalAlpha = 1; }
       }
-      drawPlayersAt(c, S, alphaOf(S), this.PR);
+      // repères de chute
+      this.falls = this.falls.filter((f) => now - f.t < 2500);
+      this.falls.forEach((f) => { c.globalAlpha = 1 - (now - f.t) / 2500; c.font = '28px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('🕳️', f.x, f.y + 10); c.globalAlpha = 1; });
+      const a = alphaOf(S);
+      drawPlayersAt(c, S, a, this.PR, 0, (i, x, y) => {
+        if (i !== M.me || !this.tiles) return;
+        // mon rond : vert si la dalle sous mes pieds tiendra, rouge sinon
+        const id = Math.min(this.R - 1, Math.max(0, Math.floor(y / T))) * this.C + Math.min(this.C - 1, Math.max(0, Math.floor(x / T)));
+        c.beginPath(); c.arc(x, y, this.PR + 9, 0, 7); c.lineWidth = 4; c.strokeStyle = safe(id) ? '#2ee59d' : '#ff4d6d'; c.stroke();
+      });
       drawFx(c, this);
     };
     draw();
@@ -2292,6 +2360,9 @@ $('#rounds').addEventListener('click', (e) => {
 $('#gamesList').addEventListener('click', (e) => { const b = e.target.closest('[data-game]'); if (b && isHost()) send({ t: 'cfg', game: b.dataset.game }); });
 $('#teams').addEventListener('click', (e) => {
   const b = e.target.closest('[data-team]'); if (b) send({ t: 'team', team: +b.dataset.team });
+  const ab = e.target.closest('[data-addbot]'); if (ab) send({ t: 'bot', a: 'add' });
+  const db = e.target.closest('[data-delbot]'); if (db) send({ t: 'bot', a: 'del', id: +db.dataset.delbot });
+  const bt = e.target.closest('[data-botteam]'); if (bt) send({ t: 'team', bot: +bt.dataset.botteam, team: +bt.dataset.to });
   const f = e.target.closest('[data-addfriend]'); if (f) { send({ t: 'friendAdd', name: f.dataset.addfriend }); f.remove(); toast('✉️ Demande d\'ami envoyée'); }
 });
 $('#btnLeave').onclick = leaveToMenu;

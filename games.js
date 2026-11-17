@@ -527,7 +527,7 @@ GAMES.filter = {
   desc: 'Trie le plus vite possible en 30 s',
   title: 'Le Filtre',
   min: 2,
-  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les objets de valeur en caisse. Tu as 3 vies ❤️ : une erreur = une vie en moins (et sonné 1,5 s), à 0 tu es viré de l'usine. 30 secondes : celui qui en a trié le plus gagne (les virés passent derrière).",
+  rules: "Ton tapis avance à TON rythme : chaque objet trié fait venir le suivant. La ferraille va au four, les objets de valeur en caisse. Tu as 3 vies ❤️ : une erreur = une vie en moins (et sonné 1,5 s), à 0 tu es viré de l'usine. 30 secondes : celui qui en a trié le plus gagne — même s'il s'est fait virer avant la fin, ses objets triés comptent.",
   create(room) {
     const n = room.n, N = 400, STUN = 1500, DUR = 30000;
     const items = Array.from({ length: N }, () => {
@@ -536,8 +536,8 @@ GAMES.filter = {
       return { e, n: name, f: frame };
     });
     const pos = new Array(n).fill(0), stun = new Array(n).fill(0), lives = new Array(n).fill(3);
-    // les virés (0 vie) passent derrière ceux qui ont tenu jusqu'au bout
-    const score = (i) => (lives[i] > 0 ? 1000 : 0) + pos[i];
+    // les points d'abord : un viré qui a trié plus passe devant ; à égalité, les vies restantes départagent
+    const score = (i) => pos[i] * 10 + lives[i];
     const end = () => {
       const best = Math.max(...pos);
       room.finish(range(n).map(score), range(n).sort((a, b) => score(b) - score(a)).map((i) => `${room.name(i)} ${pos[i]}${lives[i] ? '' : ' 💀'}`).join(' · ') + (best ? '' : ' — personne n\'a rien trié'));
@@ -583,44 +583,48 @@ GAMES.floor = {
   desc: 'Reste sur le bon symbole, pousse les autres',
   title: 'Sol instable',
   min: 2,
-  rules: "Le symbole affiché est le seul sol qui tient. À la sirène, tout le reste s'effondre. Pousse les autres dans le vide ! Dernier debout gagne.",
+  rules: "Un symbole s'affiche : seules les dalles avec CE symbole tiennent. Quand la barre est vide, tout le reste s'effondre pendant 1,5 s : tu tombes si ton personnage est au-dessus du vide. Les dalles fissurées ⚠️ tombent pour de bon. Pousse les autres dans le vide ! Dernier debout gagne.",
   create(room) {
     const n = room.n, C = 8, R = 6, T = 80, W = C * T, H = R * T, DT = 1 / 30;
     const A = makeArena(room, { W, H, SP: 220, PR: 12, spawn: circleSpawn(W, H, 170, 110) });
     const removed = new Array(C * R).fill(false);
-    let tiles = [], target = 0, holes = null, phase = 0, t = 0;
+    let tiles = [], target = 0, holes = null, phase = 0, t = 0, crack = [];
     const deathT = new Array(n).fill(Infinity);
-    const tileAt = (p) => Math.min(R - 1, Math.floor(p.y / T)) * C + Math.min(C - 1, Math.floor(p.x / T));
+    const tileAt = (x, y) => Math.max(0, Math.min(R - 1, Math.floor(y / T))) * C + Math.max(0, Math.min(C - 1, Math.floor(x / T)));
+    const hole = (x, y) => { const k = tileAt(x, y); return removed[k] || (holes && holes[k]); };
+    // on tombe quand le CENTRE du perso est au-dessus du vide (6 px de tolérance) : c'est ce que le joueur voit
+    const G = 6;
+    const falls = (p) => hole(p.x, p.y) && hole(p.x - G, p.y) && hole(p.x + G, p.y) && hole(p.x, p.y - G) && hole(p.x, p.y + G);
 
     function newPhase() {
       phase++;
-      if (phase > 1) for (let k = 0; k < 4; k++) { const free = range(C * R).filter((x) => !removed[x]); if (free.length > 8) removed[pick(free)] = true; }
       target = ri(0, 3);
-      const frac = Math.max(0.07, 0.26 - phase * 0.03);
       const live = range(C * R).filter((x) => !removed[x]);
-      const safe = new Set(shuffle([...live]).slice(0, Math.max(2, Math.round(live.length * frac))));
+      // dès la 2e vague, 4 dalles fissurées (annoncées pendant l'alerte) tombent pour de bon avec l'effondrement
+      crack = phase > 1 && live.length > 12 ? shuffle([...live]).slice(0, 4) : [];
+      const cand = live.filter((x) => !crack.includes(x));
+      const frac = Math.max(0.07, 0.26 - phase * 0.03);
+      const safe = new Set(shuffle([...cand]).slice(0, Math.max(2, Math.round(cand.length * frac))));
       tiles = range(C * R).map((x) => (removed[x] ? -1 : safe.has(x) ? target : pick([0, 1, 2, 3].filter((v) => v !== target))));
       holes = null;
-      const warn = Math.max(1300, 3000 - phase * 220);
-      room.send({ t: 'g', k: 'ph', tiles, target, ms: warn, phase });
+      const warn = Math.max(1500, 3200 - phase * 220);
+      room.send({ t: 'g', k: 'ph', tiles, target, ms: warn, phase, crack });
       room.later(drop, warn);
     }
     function drop() {
-      holes = tiles.map((v) => v !== target);
-      room.send({ t: 'g', k: 'drop' });
-      room.later(() => { holes = null; room.send({ t: 'g', k: 'restore' }); room.later(newPhase, 500); }, 1400);
+      holes = tiles.map((v, k) => v !== target || crack.includes(k));
+      crack.forEach((k) => { removed[k] = true; });
+      room.send({ t: 'g', k: 'drop', crack });
+      room.later(() => { holes = null; crack = []; room.send({ t: 'g', k: 'restore' }); room.later(newPhase, 700); }, 1400);
     }
     function step() {
       t += DT;
       A.move(DT);
       const died = [];
-      A.pl.forEach((p, i) => {
-        if (!p.alive) return;
-        const k = tileAt(p);
-        if (removed[k] || (holes && holes[k])) died.push(i);
-      });
+      A.pl.forEach((p, i) => { if (p.alive && falls(p)) died.push(i); });
       died.forEach((i) => { A.pl[i].alive = false; deathT[i] = t; });
       room.send({ t: 'g', k: 's', p: A.snap() });
+      died.forEach((i) => room.send({ t: 'g', k: 'fall', i, x: Math.round(A.pl[i].x), y: Math.round(A.pl[i].y) }));
       died.forEach((i) => room.eliminate(i));
       if (room.survivalOver(A.pl.map((p) => p.alive)) || t > 120) room.finish(deathT);
     }
@@ -859,6 +863,7 @@ GAMES.undercover = {
   desc: "Trouve l'intrus (vocal conseillé)",
   title: 'Undercover',
   min: 2,
+  noBots: true, // jeu de bluff à l'oral : pas jouable avec des bots
   intro: 7000,
   rules: (n) => (n === 2
     ? "Duel : chacun a un mot proche de celui de l'autre. À ton tour, donne UN SEUL mot d'indice, ou tente de deviner son mot (2 essais max). Attention, tes indices l'aident aussi à trouver le tien. Indice trop proche de ton mot = refusé."
@@ -1656,4 +1661,4 @@ GAMES.mines2 = {
 
 if (!hasDict) delete GAMES.words;
 
-module.exports = { GAMES, shuffle, ri };
+module.exports = { GAMES, shuffle, ri, pick, range, dict, norm, kidX };

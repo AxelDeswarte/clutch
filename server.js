@@ -14,6 +14,7 @@ const store = require('./store');
 const ACC = require('./accounts');
 const C = require('./public/cosmetics');
 const mailer = require('./mailer');
+const BOTS = require('./bots');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -140,6 +141,13 @@ class Room {
       return;
     }
     this.p.forEach((m, i) => { if ((only === undefined || only === i) && m.ws && m.ws.readyState === 1) m.ws.send(s); });
+    // les bots lisent les mêmes messages que les joueurs
+    if (this.state === 'round') {
+      this.p.forEach((m, i) => {
+        if (!m.brain || (only !== undefined && only !== i)) return;
+        try { m.brain(msg); } catch (e) { console.error(`Bot ${m.name} (${this.gameKey}) :`, e); m.brain = null; }
+      });
+    }
   }
   // journal de la manche, rejoué à un joueur qui revient après un refresh
   logMsg(msg, only) {
@@ -174,6 +182,41 @@ class Room {
   // ---------- salon ----------
   isHost(id) { return this.hostId === id; }
   teamCount(t) { return this.members.filter((m) => m.team === t).length; }
+  hasBots() { return this.members.some((m) => m.bot); }
+
+  // ---------- bots ----------
+  addBot() {
+    if (this.state !== 'lobby' || this.members.length >= MAX_MEMBERS) return;
+    const taken = new Set(this.members.map((m) => m.name));
+    const name = '🤖 ' + (shuffle([...BOTS.BOT_NAMES]).find((x) => !taken.has('🤖 ' + x)) || 'Bot');
+    const t0 = this.teamCount(0), t1 = this.teamCount(1);
+    this.members.push({
+      id: nextMemberId++, key: '', bot: true, ws: null, team: t0 <= t1 ? 0 : 1, offline: false,
+      uid: null, name, avatar: C.BASE_AVATARS[ri(0, C.BASE_AVATARS.length - 1)], frame: 'classic', title: '', level: 0,
+    });
+    this.broadcastRoom();
+  }
+  removeBot(id) {
+    if (this.state !== 'lobby') return;
+    this.members = this.members.filter((m) => !(m.bot && m.id === id));
+    this.broadcastRoom();
+  }
+  // un cerveau neuf par bot et par manche ; ses entrées passent par des minuteurs du salon (annulés en fin de manche)
+  wakeBots() {
+    const g = this.game, key = this.gameKey;
+    this.p.forEach((m, i) => {
+      m.brain = null;
+      if (!m.bot) return;
+      const lag = ri(70, 140); // temps de réaction propre à chaque bot
+      const ok = () => this.game === g && this.state === 'round';
+      m.brain = BOTS.makeBrain(key, {
+        i, n: this.n, sideOf: this.sideOf,
+        act: (msg, ms = lag) => this.later(() => { if (ok()) g.input(i, msg); }, Math.max(1, ms)),
+        later: (fn, ms) => this.later(() => { if (ok()) fn(); }, Math.max(1, ms)),
+        cancel: (id) => this.cancel(id),
+      });
+    });
+  }
   presence() { this.members.forEach((m) => presenceChanged(m.uid)); }
 
   startCheck() {
@@ -191,19 +234,19 @@ class Room {
   }
 
   playable(c) {
-    const teams = !!MODES[this.mode].teamSize;
-    return [...this.enabled].filter((k) => GAMES[k].min <= c && (!teams || GAMES[k].team));
+    const teams = !!MODES[this.mode].teamSize, bots = this.hasBots();
+    return [...this.enabled].filter((k) => GAMES[k].min <= c && (!teams || GAMES[k].team) && !(bots && GAMES[k].noBots));
   }
 
   broadcastRoom() {
     const chk = this.startCheck();
-    const members = this.members.map((x) => ({ id: x.id, uid: x.uid, name: x.name, team: x.team, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, offline: !!x.offline }));
+    const members = this.members.map((x) => ({ id: x.id, uid: x.uid, name: x.name, team: x.team, avatar: x.avatar, frame: x.frame, title: x.title, level: x.level, offline: !!x.offline, bot: !!x.bot }));
     this.members.forEach((m) => sendWs(m.ws, {
       t: 'room', code: this.code, you: m.id, key: m.key, host: this.hostId,
       mode: this.mode, rounds: this.rounds, goal: this.goal, target: this.target,
       modes: Object.entries(MODES).map(([k, v]) => ({ key: k, label: v.label, min: v.min, max: v.max })),
       members,
-      games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k), team: !!GAMES[k].team })),
+      games: GAME_KEYS.map((k) => ({ key: k, title: GAMES[k].title, icon: GAMES[k].icon, desc: GAMES[k].desc, min: GAMES[k].min, on: this.enabled.has(k), team: !!GAMES[k].team, noBots: !!GAMES[k].noBots })),
       canStart: chk.ok, hint: chk.hint, inMatch: this.state !== 'lobby', lastResult: this.lastResult,
     }));
   }
@@ -233,8 +276,9 @@ class Room {
     if (!this.members.includes(member)) return;
     this.members = this.members.filter((m) => m !== member);
     presenceChanged(member.uid);
-    if (this.members.length === 0) { this.clearTimers(); rooms.delete(this.code); return; }
-    if (this.hostId === member.id) this.hostId = (this.members.find((m) => !m.offline) || this.members[0]).id;
+    // plus aucun humain : le salon disparaît avec ses bots
+    if (!this.members.some((m) => !m.bot)) { this.members = []; this.clearTimers(); rooms.delete(this.code); return; }
+    if (this.hostId === member.id) this.hostId = (this.members.find((m) => !m.offline && !m.bot) || this.members.find((m) => !m.bot)).id;
     if (this.state !== 'lobby' && this.p && this.p.includes(member)) {
       this.abort(`${member.name} a quitté la partie.`);
     } else {
@@ -328,8 +372,8 @@ class Room {
     this.game = def.create(this);
     this.lastGame = def;
     const decisive = !this.byPoints && this.round > this.maxRounds;
-    // Chacun lit les règles et clique « Prêt » ; départ forcé au bout de 90 s (AFK)
-    this.roundReady = new Set();
+    // Chacun lit les règles et clique « Prêt » ; départ forcé au bout de 90 s (AFK). Les bots sont prêts d'office.
+    this.roundReady = new Set(this.p.map((m, i) => (m.bot ? i : -1)).filter((i) => i >= 0));
     this.launching = false;
     this.lastIntro = {
       t: 'roundIntro', game: key, title: def.title, icon: def.icon, rules: typeof def.rules === 'function' ? def.rules(this.n) : def.rules, keys: def.keys, touch: def.touch,
@@ -363,7 +407,7 @@ class Room {
     this.launching = true;
     this.cancel(this.introTimer);
     this.send({ t: 'countdown', ms: 3000 });
-    this.later(() => { this.launching = false; this.state = 'round'; this.game.start(); }, 3000);
+    this.later(() => { this.launching = false; this.state = 'round'; this.wakeBots(); this.game.start(); }, 3000);
   }
 
   input(member, m) {
@@ -668,10 +712,19 @@ wss.on('connection', (ws) => {
         }
         room.broadcastRoom();
         break;
-      case 'team':
+      case 'team': {
         if (room.state !== 'lobby' || (m.team !== 0 && m.team !== 1)) return;
-        member.team = m.team;
+        // l'hôte peut aussi changer l'équipe d'un bot
+        const who = m.bot ? room.isHost(member.id) && room.members.find((x) => x.bot && x.id === m.bot) : member;
+        if (!who) return;
+        who.team = m.team;
         room.broadcastRoom();
+        break;
+      }
+      case 'bot':
+        if (!room.isHost(member.id)) return;
+        if (m.a === 'add') room.addBot();
+        else if (m.a === 'del') room.removeBot(m.id);
         break;
       case 'start':
         if (!room.isHost(member.id) || room.state !== 'lobby' || !room.startCheck().ok) return;

@@ -16,6 +16,12 @@ code et essais partagés (Code secret).
 Chaque manche rapporte 1 point à son gagnant (ou à son équipe), 0 aux autres. Égalité à la fin = manche décisive,
 égalité en tête aux points = on continue. Déminage et Undercover sont décochés par défaut.
 
+**Bots** : l'hôte peut ajouter des bots 🤖 dans le salon (bouton « Ajouter un bot ») pour compléter une partie ou jouer seul.
+Ils jouent à tous les mini-jeux sauf Undercover (bluff à l'oral, grisé quand il y a des bots), avec un temps de réaction et des erreurs pour rester battables.
+En 2v2 / 3v3, l'hôte choisit leur équipe (⇄).
+
+Pendant le match, la barre du haut affiche le classement en direct (rang, points, objectif), et l'écran des règles comme la fin de manche rappellent le score du match.
+
 Un chat de salon est dispo partout (salle d'attente et parties), avec l'historique des 40 derniers messages.
 L'accueil affiche un classement : les derniers gagnants (invités compris) et le top 10 des comptes aux victoires.
 
@@ -28,8 +34,8 @@ L'accueil affiche un classement : les derniers gagnants (invités compris) et le
 | 🧠 Mémoire | recliquer les cases allumées, une de plus par niveau |
 | 🪚 Lames | esquiver scies circulaires et lasers rotatifs |
 | 🏃 Course de haies | alterner ← → et sauter au bon moment |
-| 🔥 Le Filtre | 30 s de tapis infini : objets de valeur en caisse, ferraille au four, 3 vies |
-| 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide |
+| 🔥 Le Filtre | 30 s de tapis infini : objets de valeur en caisse, ferraille au four, 3 vies ; le nombre d'objets triés départage (même viré) |
+| 🕳️ Sol instable | rester sur le bon symbole, bousculer les autres dans le vide ; dalles fissurées annoncées, rond vert / rouge sous ton perso |
 | 🚬 Pause clope | tirer et relâcher dans la zone verte sans tousser |
 | 🍽️ Bonnes manières | manger quand Tonton ne regarde pas, sinon il tire |
 | 🕷️ L'Araignée | patate chaude : refiler l'araignée-bombe avant l'explosion |
@@ -74,6 +80,7 @@ Voir **[DEPLOY.md](DEPLOY.md)** : VPS OVHcloud + un script qui installe tout (`d
 - `mailer.js` : envoi des emails via Resend (`RESEND_API_KEY`). Sans clé, le lien est affiché dans la console du serveur.
 - `public/cosmetics.js` : niveaux et catalogue des skins, partagé client/serveur.
 - `games.js` : logique des 20 mini-jeux. **Serveur autoritaire** : il génère les manches, valide les inputs et décide des classements.
+- `bots.js` : un « cerveau » de bot par mini-jeu. Il reçoit les mêmes messages qu'un joueur et renvoie les mêmes entrées.
 - `public/app.js` : client (salon, affichage de chaque jeu, interpolation des jeux en temps réel).
 - `public/gags.js` : animations d'élimination (Web Animations API) + sons synthétisés (WebAudio, aucun fichier audio).
 
@@ -100,6 +107,9 @@ L'API de `room` est documentée en haut de `games.js` (`send`, `later`, `every`,
 Le classement vient de `finish(scores)` : score plus haut = mieux classé.
 
 Côté client, dans `public/app.js` : `GAMES.monJeu = { init(), msg(m), key(e)?, stop()? }`.
+
+Pour que les bots y jouent, ajoute `BRAINS.monJeu = (ctx) => (msg) => { … ctx.act({ a: '…' }) }` dans `bots.js`
+(ou `noBots: true` sur le jeu s'il ne s'y prête pas).
 
 ## Ajouter un gag d'élimination
 
