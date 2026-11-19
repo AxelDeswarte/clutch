@@ -395,6 +395,96 @@ BRAINS.tank = (ctx) => {
   };
 };
 
+// ── Gâchette ──
+// Vise avec la vraie balistique (angle bas qui atteint la cible malgré la gravité, en anticipant son
+// déplacement), garde une distance de duel, esquive en sautant, évite le vide, saute vers les ennemis perchés.
+BRAINS.gun = (ctx) => {
+  let G = null, tick = 0, mvKey = '', jumpOn = false, lastAim = 1e9, strafe = 1, strafeT = 0, prevB = [], blocked = 0;
+  const solid = (x, y) => G.rects.some(([rx, ry, rw, rh, one]) => !one && x > rx && x < rx + rw && y > ry && y < ry + rh);
+  const setMv = (x, down) => { const k = x + ',' + !!down; if (k !== mvKey) { mvKey = k; ctx.act({ a: 'mv', x, down: !!down }); } };
+  const jump = (hold = 260) => {
+    if (jumpOn) return;
+    jumpOn = true; ctx.act({ a: 'jump', on: true });
+    ctx.later(() => { jumpOn = false; ctx.act({ a: 'jump', on: false }, 1); }, hold);
+  };
+  // angle (repère écran) pour toucher (dx, dy) à la vitesse v, gravité g ; trajectoire tendue si possible
+  // high = tir en cloche (par-dessus un obstacle) plutôt que tendu
+  function ballistic(dx, dy, v, g, high) {
+    const x = Math.abs(dx), y = -dy, v2 = v * v, disc = v2 * v2 - g * (g * x * x + 2 * y * v2);
+    const up = disc < 0 ? Math.PI / 4 : Math.atan((v2 + (high ? 1 : -1) * Math.sqrt(disc)) / (g * Math.max(1, x)));
+    return { a: dx >= 0 ? -up : Math.PI + up, t: x / Math.max(1, v * Math.cos(up)) };
+  }
+  // la balle passe-t-elle sans heurter de bloc avant d'arriver à la cible ?
+  function clear(x, y, a, tx) {
+    let vx = Math.cos(a) * G.bs, vy = Math.sin(a) * G.bs;
+    for (let k = 0; k < 90; k++) {
+      vy += G.bg / 60; x += vx / 60; y += vy / 60;
+      if ((vx > 0 && x >= tx) || (vx < 0 && x <= tx)) return true;
+      if (solid(x, y) || y > G.h) return false;
+    }
+    return false;
+  }
+  return (m) => {
+    if (m.k === 'gun') { G = { w: m.w, h: m.h, pw: m.pw, ph: m.ph, bs: m.bs, bg: m.bg, pit: m.pit, rects: m.rects }; return; }
+    if (m.k !== 's' || !G) return;
+    const before = prevB; prevB = m.b;
+    if (tick++ % 2) return;
+    const me = m.p[ctx.i];
+    if (!me || me[2] !== 1) { setMv(0); return; }
+    const [x, y] = me, onGround = me[11], wall = me[12];
+    const foes = m.p.map((q, j) => [q, j]).filter(([q, j]) => j !== ctx.i && q[2] === 1 && ctx.sideOf[j] !== ctx.sideOf[ctx.i]);
+    if (!foes.length) { setMv(0); return; }
+    const [tq] = foes.sort((a, b) => Math.hypot(a[0][0] - x, a[0][1] - y) - Math.hypot(b[0][0] - x, b[0][1] - y))[0];
+    const dx = tq[0] - x, dy = tq[1] - y, side = Math.sign(dx) || 1;
+
+    // déplacement : distance de duel 180–320 px, petits pas de côté pour ne pas être une cible fixe
+    if (--strafeT <= 0) { strafe = pick([-1, 1, 1]); strafeT = 8 + Math.floor(Math.random() * 12); }
+    let mx = 0;
+    const ad = Math.abs(dx);
+    if (ad > 320) mx = side; else if (ad < 170) mx = -side; else mx = strafe * (Math.random() < 0.5 ? side : -side);
+    // le vide : ses bords sont des murs pour un bot au sol ; projeté au-dessus, il se rattrape vers le bord le plus proche
+    if (G.pit) {
+      const [p0, p1] = G.pit, mid = (p0 + p1) / 2, low = y > 330;
+      if (low && x < p0 && x + mx * 70 > p0 - 12) mx = x > p0 - 40 ? -1 : 0;
+      if (low && x > p1 && x + mx * 70 < p1 + 12) mx = x < p1 + 40 ? 1 : 0;
+      if (x >= p0 - 4 && x <= p1 + 4 && me[7] >= 0 && y > 300) mx = x < mid ? -1 : 1;
+    }
+    // ennemi perché : sauter ; ennemi en contrebas sur une planche : descendre
+    let down = false;
+    if (dy < -70 && onGround && Math.random() < 0.35) jump(300);
+    if (dy > 70 && onGround && Math.random() < 0.5) down = true;
+    if (wall && mx === wall) jump(260); // contre un mur : saut mural
+    // esquive : une balle ennemie va passer sur moi dans le prochain demi-second
+    if (Math.random() < 0.7) for (const b of m.b) {
+      if (b[2] === ctx.i || ctx.sideOf[b[2]] === ctx.sideOf[ctx.i]) continue;
+      let bx = b[0], by = b[1], bvx = b[3] * 10, bvy = b[4] * 10, hit = false;
+      for (let k = 0; k < 30 && !hit; k++) { bvy += G.bg / 60; bx += bvx / 60; by += bvy / 60; if (Math.abs(bx - x) < 22 && Math.abs(by - y) < 24) hit = true; }
+      if (hit) { if (onGround) jump(200 + Math.random() * 150); else mx = -Math.sign(bvx) || mx; break; }
+    }
+    if (before.length && Math.random() < 0.02) jump(); // un saut de temps en temps : moins prévisible
+    setMv(mx, down);
+
+    // visée balistique avec anticipation du déplacement de la cible, et une petite erreur humaine ;
+    // si le tir tendu est bouché, on essaie le tir en cloche
+    const mx0 = x, my0 = y - 2;
+    const aimFor = (high) => {
+      let sol = ballistic(dx, dy, G.bs, G.bg, high);
+      const lead = Math.min(high ? 1.2 : 0.6, sol.t);
+      sol = ballistic(dx + tq[6] * 10 * lead * 0.8, dy + Math.min(0, tq[7] * 10 * lead * 0.3), G.bs, G.bg, high);
+      return sol.a + gauss() * (high ? 0.025 : 0.035);
+    };
+    const open = (a) => clear(mx0 + Math.cos(a) * (G.pw + 12), my0 + Math.sin(a) * (G.pw + 12), a, tq[0]);
+    let a = aimFor(false), shot = open(a);
+    if (!shot) { const h = aimFor(true); if (open(h)) { a = h; shot = true; } }
+    if (Math.abs(a - lastAim) > 0.015) { lastAim = a; ctx.act({ a: 'aim', v: Math.round(a * 1000) }, 1); }
+    const ready = me[9] > 0 && me[10] >= 100;
+    if (ready && shot && Math.random() < 0.6) ctx.act({ a: 'fire' }, 90);
+    // pas de ligne de tir depuis un moment : on va chercher l'ennemi (en sautant pour monter sur les plateformes)
+    blocked = shot ? 0 : blocked + 1;
+    if (blocked > 12) { setMv(side, false); if (onGround && Math.random() < 0.4) jump(320); }
+  };
+};
+
 // ── Syllabes ──
 let WORDS = null; // tous les mots du dictionnaire, en tableau pour piocher au hasard
 BRAINS.words = (ctx) => {

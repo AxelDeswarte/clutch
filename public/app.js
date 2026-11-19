@@ -1863,6 +1863,233 @@ GAMES.tank = {
   stop() { cancelAnimationFrame(this.raf); },
 };
 
+// ── Gâchette : duel de plateformes, balles soumises à la gravité ──
+GAMES.gun = {
+  init() {
+    $('#stage').innerHTML = `<div class="screen-dark"><canvas id="gc" width="800" height="480" style="cursor:crosshair;touch-action:none"></canvas></div>${legend()}
+      <p class="sub">Q D courir · Z / Espace sauter · S descendre · souris viser · clic tirer · les pointillés montrent la chute de ta balle</p>`;
+    this.S = {}; this.raf = null; this.rects = []; this.fx = []; this.parts = []; this.flash = {}; this.shake = 0;
+    this.held = new Set(); this.lastMv = ''; this.aim = 0; this.sentAim = 1e9; this.aimT = 0; this.mouse = null; this.firing = null; this.keyAim = 0;
+    const cv = $('#gc');
+    const toCanvas = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * (cv.width / r.width), (e.clientY - r.top) * (cv.height / r.height)]; };
+    cv.addEventListener('pointermove', (e) => { this.mouse = toCanvas(e); });
+    cv.addEventListener('pointerdown', (e) => { e.preventDefault(); this.mouse = toCanvas(e); this.aimNow(true); this.startFire(); });
+    addEventListener('pointerup', this.onUp = () => this.stopFire());
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    if (isTouch) {
+      const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'justify-content:center;margin-top:10px;gap:8px';
+      [['⬅', 'left'], ['➡', 'right'], ['⬇', 'down'], ['⤒ Saut', 'jump']].forEach(([l, k]) => {
+        const b = document.createElement('button'); b.className = 'btn white'; b.textContent = l; b.style.minWidth = '70px';
+        const on = (v) => (ev) => { ev.preventDefault(); if (k === 'jump') send({ t: 'input', a: 'jump', on: v }); else { v ? this.held.add(k) : this.held.delete(k); this.sendMv(); } };
+        b.addEventListener('pointerdown', on(true)); b.addEventListener('pointerup', on(false)); b.addEventListener('pointerleave', on(false));
+        row.appendChild(b);
+      });
+      $('#stage').appendChild(row);
+    }
+  },
+  me() { const B = this.S.cur && this.S.cur.d; return B ? B.p[M.me] : null; },
+  sendMv() {
+    const x = (this.held.has('right') ? 1 : 0) - (this.held.has('left') ? 1 : 0), down = this.held.has('down');
+    const k = x + ',' + down;
+    if (k !== this.lastMv) { this.lastMv = k; send({ t: 'input', a: 'mv', x, down }); }
+  },
+  // visée : vers la souris (ou ajustée au clavier), envoyée quand elle change assez, 25 fois par seconde au plus
+  aimNow(force) {
+    const p = this.me(); if (!p) return;
+    if (this.mouse) this.aim = Math.atan2(this.mouse[1] - (p[1] - 2), this.mouse[0] - p[0]);
+    const now = performance.now();
+    if (force || (Math.abs(this.aim - this.sentAim) > 0.02 && now - this.aimT > 40)) {
+      this.sentAim = this.aim; this.aimT = now;
+      if (active && !dead) send({ t: 'input', a: 'aim', v: Math.round(this.aim * 1000) });
+    }
+  },
+  startFire() {
+    if (!active || dead) return;
+    send({ t: 'input', a: 'fire' });
+    clearInterval(this.firing);
+    this.firing = setInterval(() => { this.aimNow(true); send({ t: 'input', a: 'fire' }); }, 110); // maintenu = tir dès que possible
+  },
+  stopFire() { clearInterval(this.firing); this.firing = null; },
+  key(e) {
+    const c = e.code;
+    if (c === 'KeyA' || c === 'ArrowLeft') { e.preventDefault(); this.held.add('left'); this.sendMv(); }
+    else if (c === 'KeyD' || c === 'ArrowRight') { e.preventDefault(); this.held.add('right'); this.sendMv(); }
+    else if (c === 'KeyS') { e.preventDefault(); this.held.add('down'); this.sendMv(); }
+    else if (c === 'KeyW' || c === 'Space') { e.preventDefault(); if (!e.repeat) send({ t: 'input', a: 'jump', on: true }); }
+    else if (c === 'ArrowUp' || c === 'ArrowDown') { e.preventDefault(); this.keyAim = c === 'ArrowUp' ? -1 : 1; this.mouse = null; }
+    else if (c === 'Enter' || c === 'KeyF') { e.preventDefault(); if (!e.repeat) { this.aimNow(true); this.startFire(); } }
+    else if (c === 'KeyR') send({ t: 'input', a: 'reload' });
+  },
+  keyup(e) {
+    const c = e.code;
+    if (c === 'KeyA' || c === 'ArrowLeft') { this.held.delete('left'); this.sendMv(); }
+    else if (c === 'KeyD' || c === 'ArrowRight') { this.held.delete('right'); this.sendMv(); }
+    else if (c === 'KeyS') { this.held.delete('down'); this.sendMv(); }
+    else if (c === 'KeyW' || c === 'Space') send({ t: 'input', a: 'jump', on: false });
+    else if (c === 'ArrowUp' || c === 'ArrowDown') this.keyAim = 0;
+    else if (c === 'Enter' || c === 'KeyF') this.stopFire();
+  },
+  blur() { this.held.clear(); this.sendMv(); this.stopFire(); send({ t: 'input', a: 'jump', on: false }); },
+  burst(x, y, col, n, sp) {
+    for (let k = 0; k < n; k++) { const a = Math.random() * 6.28, v = sp * (0.4 + Math.random()); this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - sp * 0.4, t: 0, life: 0.35 + Math.random() * 0.35, col }); }
+  },
+  msg(m) {
+    if (m.k === 'gun') {
+      Object.assign(this, { W: m.w, H: m.h, PW: m.pw, PH: m.ph, BR: m.br, BS: m.bs, BG: m.bg, pit: m.pit, mapName: m.map });
+      this.rects = m.rects.map(([x, y, w, h, one]) => ({ x, y, w, h, one }));
+      M.players.forEach((_, i) => legendSet(i, '❤️❤️'));
+      fxText(this, this.W / 2, 60, `📍 ${m.map}`, '#fff');
+      this.loop();
+    }
+    if (m.k === 'fire') {
+      this.flash[m.i] = performance.now();
+      this.burst(m.x, m.y, '#ffd23f', 5, 120);
+      if (m.i === M.me) this.shake = Math.max(this.shake, 3);
+      SFX.play('gun');
+    }
+    if (m.k === 'jump' && m.i === M.me) SFX.play('boing');
+    if (m.k === 'spark') { this.burst(m.x, m.y, '#fff3c4', 7, 150); SFX.play('ping'); }
+    if (m.k === 'hit') {
+      this.burst(m.x, m.y, P(m.i).color, 12, 220);
+      fxText(this, m.x, m.y - 28, '-34', '#ff4d6d');
+      if (m.i === M.me) this.shake = 10;
+      SFX.play('bonk');
+    }
+    if (m.k === 'ko') {
+      this.burst(m.x, m.fell ? this.H - 10 : m.y, P(m.i).color, 30, 320);
+      this.burst(m.x, m.fell ? this.H - 10 : m.y, '#fff', 12, 260);
+      fxText(this, m.x, Math.min(this.H - 30, m.y) - 34, m.l > 0 ? (m.fell ? 'DANS LE VIDE !' : 'K.O. !') : 'ÉLIMINÉ !', m.l > 0 ? '#ffd23f' : '#ff4d6d');
+      legendSet(m.i, m.l > 0 ? '❤️'.repeat(m.l) + '🖤'.repeat(2 - m.l) : '💀');
+      if (m.i === M.me) this.shake = 16;
+      SFX.play('boom');
+    }
+    if (m.k === 's') pushSnap(this.S, m);
+  },
+  loop() {
+    const cv = $('#gc'), c = cv.getContext('2d');
+    const W = this.W, H = this.H, PW = this.PW, PH = this.PH;
+    // décor fixe (ciel, collines, plateformes) dessiné une fois dans un canvas hors champ
+    const bg = document.createElement('canvas'); bg.width = W; bg.height = H;
+    const g = bg.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#2b1d5c'); sky.addColorStop(0.55, '#a8466f'); sky.addColorStop(1, '#ffb36b');
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(255,255,255,.75)';
+    for (let k = 0; k < 40; k++) { const x = (k * 137) % W, y = (k * 71) % (H * 0.45); g.globalAlpha = 0.2 + ((k * 13) % 10) / 14; g.fillRect(x, y, 2, 2); }
+    g.globalAlpha = 1;
+    g.fillStyle = '#ffe3a3'; g.beginPath(); g.arc(W * 0.78, H * 0.3, 34, 0, 7); g.fill();
+    [['#6b2f6e', 0.62, 40, 0.012], ['#4a2160', 0.72, 30, 0.02]].forEach(([col, base, amp, f]) => {
+      g.fillStyle = col; g.beginPath(); g.moveTo(0, H);
+      for (let x = 0; x <= W; x += 10) g.lineTo(x, H * base - Math.sin(x * f + base * 9) * amp - Math.sin(x * f * 2.7) * amp * 0.3);
+      g.lineTo(W, H); g.fill();
+    });
+    if (this.pit) { // le gouffre : un trou sombre qui aspire la lumière
+      const [a, b] = this.pit, pg = g.createLinearGradient(0, 400, 0, H); pg.addColorStop(0, 'rgba(20,10,40,0)'); pg.addColorStop(1, '#0d0820');
+      g.fillStyle = pg; g.fillRect(a, 400, b - a, H - 400);
+    }
+    this.rects.forEach((r) => {
+      g.lineWidth = 3; g.strokeStyle = '#1b1440';
+      if (r.one) { // planche en bois, clous
+        g.fillStyle = '#c98b4a'; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 4); g.fill(); g.stroke();
+        g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(r.x + 4, r.y + 3, r.w - 8, 3);
+        g.fillStyle = '#1b1440'; for (let x = r.x + 10; x < r.x + r.w - 4; x += 30) { g.beginPath(); g.arc(x, r.y + r.h / 2 + 1, 1.8, 0, 7); g.fill(); }
+      } else { // bloc de pierre : briques, liseré d'herbe sur le dessus
+        g.fillStyle = '#4b3d86'; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 6); g.fill();
+        g.save(); g.clip();
+        g.strokeStyle = 'rgba(27,20,64,.35)'; g.lineWidth = 2;
+        for (let y = r.y + 16, row = 0; y < r.y + r.h; y += 16, row++) { g.beginPath(); g.moveTo(r.x, y); g.lineTo(r.x + r.w, y); g.stroke(); }
+        for (let y = r.y, row = 0; y < r.y + r.h; y += 16, row++) for (let x = r.x + (row % 2 ? 14 : 28); x < r.x + r.w; x += 28) { g.beginPath(); g.moveTo(x, y); g.lineTo(x, Math.min(r.y + r.h, y + 16)); g.stroke(); }
+        g.fillStyle = '#2ee59d'; g.fillRect(r.x, r.y, r.w, 6); g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(r.x, r.y, r.w, 2);
+        g.restore();
+        g.strokeStyle = '#1b1440'; g.lineWidth = 3; g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 6); g.stroke();
+      }
+    });
+
+    let last = performance.now();
+    const draw = () => {
+      this.raf = requestAnimationFrame(draw);
+      const S = this.S; if (!S.cur) return;
+      const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now;
+      const a = alphaOf(S), A = S.prev.d, B = S.cur.d;
+      // visée au clavier : ⬆ ⬇ font tourner le canon du côté où l'on regarde
+      if (this.keyAim) { const right = Math.cos(this.aim) >= 0; this.aim += this.keyAim * (right ? 1 : -1) * dt * 2.6; }
+      if (active && !dead) this.aimNow(false);
+
+      c.save();
+      if (this.shake > 0.3) { c.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake); this.shake *= Math.pow(0.0005, dt); } else this.shake = 0;
+      c.drawImage(bg, 0, 0);
+
+      // aperçu de trajectoire (moi seulement) : la parabole réelle de la prochaine balle
+      const mp = B.p[M.me], mq = A.p[M.me] || mp;
+      if (mp && mp[2] === 1 && active && !dead) {
+        const x0 = lerp(mq[0], mp[0], a), y0 = lerp(mq[1], mp[1], a) - 2;
+        const ca = Math.cos(this.aim), sa = Math.sin(this.aim);
+        // même intégration que le serveur (60 Hz, la vitesse du tireur s'ajoute à la balle)
+        let x = x0 + ca * (PW + 12), y = y0 + sa * (PW + 12), vx = ca * this.BS + mp[6] * 3, vy = sa * this.BS + mp[7] * 1.5;
+        c.fillStyle = mp[9] > 0 && mp[10] >= 100 ? '#fff' : 'rgba(255,255,255,.35)';
+        for (let k = 0; k < 26; k++) {
+          vy += this.BG / 60; x += vx / 60; y += vy / 60;
+          if (x < 0 || x > W || y > H || this.rects.some((r) => !r.one && x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h)) break;
+          c.globalAlpha = 0.9 * (1 - k / 26); c.beginPath(); c.arc(x, y, k % 2 ? 1.6 : 2.4, 0, 7); c.fill();
+        }
+        c.globalAlpha = 1;
+      }
+
+      // balles : tête lumineuse + traînée dans le sens de la vitesse (position extrapolée entre deux images)
+      const ex = a / 30;
+      B.b.forEach(([x, y, o, vx, vy]) => {
+        const X = x + vx * 10 * ex, Y = y + vy * 10 * ex, sp = Math.hypot(vx, vy) || 1;
+        c.strokeStyle = P(o).color; c.lineWidth = 4; c.lineCap = 'round'; c.globalAlpha = 0.55;
+        c.beginPath(); c.moveTo(X - (vx / sp) * 22, Y - (vy / sp) * 22); c.lineTo(X, Y); c.stroke(); c.globalAlpha = 1;
+        c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2; c.beginPath(); c.arc(X, Y, this.BR + 1, 0, 7); c.fill(); c.stroke();
+      });
+
+      // joueurs
+      B.p.forEach((p, i) => {
+        if (p[2] !== 1) return;
+        const q = A.p[i] && A.p[i][2] === 1 ? A.p[i] : p;
+        const x = lerp(q[0], p[0], a), y = lerp(q[1], p[1], a);
+        const ang = i === M.me && active && !dead ? this.aim : p[3] / 100;
+        const blink = p[8] && Math.floor(now / 90) % 2;
+        c.globalAlpha = blink ? 0.45 : 1;
+        hero(c, i, x, y, PH + 3, { vx: p[6] / 2, vy: p[7] / 3, name: P(i).name, flip: Math.cos(ang) < 0, shadow: !!p[11] });
+        // le pistolet : il suit la visée, se retourne quand on vise à gauche, recule au tir
+        const fl = this.flash[i] && now - this.flash[i] < 90, kick = fl ? 4 : 0;
+        c.save(); c.translate(x, y - 2); c.rotate(ang); if (Math.cos(ang) < 0) c.scale(1, -1);
+        c.fillStyle = '#2a2350'; c.strokeStyle = '#1b1440'; c.lineWidth = 2;
+        c.beginPath(); c.roundRect(PW - 4 - kick, -4, 22, 8, 2); c.fill(); c.stroke();
+        c.fillStyle = P(i).color; c.fillRect(PW - kick, -2, 10, 3);
+        c.fillStyle = '#2a2350'; c.beginPath(); c.roundRect(PW - 2 - kick, 2, 7, 9, 2); c.fill(); c.stroke();
+        if (fl) { c.fillStyle = '#ffd23f'; c.beginPath(); c.moveTo(PW + 18, 0); c.lineTo(PW + 34, -7); c.lineTo(PW + 30, 0); c.lineTo(PW + 34, 7); c.closePath(); c.fill(); }
+        c.restore();
+        c.globalAlpha = 1;
+        // barre de PV + cœurs sous le personnage
+        const bw = 36, by = y + PH + 10;
+        c.fillStyle = '#1b1440'; c.beginPath(); c.roundRect(x - bw / 2 - 2, by - 2, bw + 4, 8, 4); c.fill();
+        const k = p[5] / 100; c.fillStyle = k > 0.6 ? '#2ee59d' : k > 0.3 ? '#ffd23f' : '#ff4d6d';
+        if (k > 0) { c.beginPath(); c.roundRect(x - bw / 2, by, bw * k, 4, 2); c.fill(); }
+        for (let l = 0; l < 2; l++) Hero.emoji(c, l < p[4] ? '❤️' : '🖤', x - 7 + l * 14, by + 13, 10);
+        // mes munitions : trois balles, ou l'arc de recharge
+        if (i === M.me) {
+          if (p[10] < 100) { c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x + bw / 2 + 12, by + 2, 6, -1.57, -1.57 + (p[10] / 100) * 6.28); c.stroke(); }
+          else for (let s = 0; s < 3; s++) { c.fillStyle = s < p[9] ? '#ffd23f' : 'rgba(255,255,255,.25)'; c.fillRect(x + bw / 2 + 6 + s * 5, by - 3, 3, 9); }
+        }
+      });
+
+      // éclats
+      this.parts = this.parts.filter((s) => (s.t += dt) < s.life);
+      this.parts.forEach((s) => {
+        s.vy += 900 * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+        c.globalAlpha = 1 - s.t / s.life; c.fillStyle = s.col; c.fillRect(s.x - 2, s.y - 2, 4, 4);
+      });
+      c.globalAlpha = 1;
+      drawFx(c, this);
+      c.restore();
+    };
+    draw();
+  },
+  stop() { cancelAnimationFrame(this.raf); this.stopFire(); removeEventListener('pointerup', this.onUp); },
+};
+
 // ── Syllabes ──
 GAMES.words = {
   init() {
