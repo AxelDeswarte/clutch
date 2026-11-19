@@ -468,6 +468,122 @@
   }
   /* textes minimum 12 px (étiquettes de niveau, verrous, sous-titres) */
   .lv, .lock, .bin small, .cpal .cdot small, .sbscore .pts1 { font-size: 12px; }
+
+  /* ═════════════════ REFONTE : même ADN cartoon (encre, Fredoka, couleurs vives), en plus doux et plus soigné ═════════════════ */
+  :root {
+    --r-lg: 26px; --r-md: 18px; --r-sm: 12px;
+    --lift: 0 7px 0 var(--line);
+    --glow: 0 24px 48px -24px rgba(20, 8, 70, .65);
+    --gloss: inset 0 3px 0 rgba(255,255,255,.55), inset 0 -4px 0 rgba(27,20,64,.12);
+    --paper-hi: #fffdf7;
+  }
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  ::selection { background: var(--yellow); color: var(--ink); }
+  #app { padding-top: 26px; }
+
+  /* cartes : papier plus lumineux, ombre d'encre + ombre portée douce, liseré clair en haut */
+  .card { background: linear-gradient(180deg, var(--paper-hi), var(--paper) 60%); border-radius: var(--r-lg); padding: 22px;
+    box-shadow: var(--lift), var(--glow), inset 0 2px 0 #fff; }
+  .lbl { font-size: 14px; letter-spacing: 1.6px; color: var(--ink2); padding-bottom: 10px; margin-bottom: 14px; border-bottom: 2px dashed rgba(27,20,64,.12); }
+
+  /* boutons : reflet en haut, ombre interne en bas, enfoncement franc */
+  .btn { box-shadow: 0 5px 0 var(--line), var(--gloss); border-radius: var(--r-md); }
+  .btn:hover:not(:disabled) { box-shadow: 0 8px 0 var(--line), var(--gloss); filter: brightness(1.04) saturate(1.05); }
+  .btn:active:not(:disabled) { box-shadow: 0 1px 0 var(--line), inset 0 4px 0 rgba(27,20,64,.15); }
+  .btn.sm { box-shadow: 0 3px 0 var(--line), inset 0 2px 0 rgba(255,255,255,.55), inset 0 -3px 0 rgba(27,20,64,.1); border-radius: var(--r-sm); }
+  .btn.sm:hover:not(:disabled) { box-shadow: 0 5px 0 var(--line), inset 0 2px 0 rgba(255,255,255,.55); }
+  .btn.big { box-shadow: 0 7px 0 var(--line), var(--gloss); border-radius: 22px; letter-spacing: .5px; }
+  .btn.big:hover:not(:disabled) { box-shadow: 0 10px 0 var(--line), var(--gloss); }
+
+  /* champs : plus d'air, focus franc et bleu */
+  input { border-radius: var(--r-md); transition: border-color .15s, box-shadow .15s, background .15s; }
+  input:focus { border-color: var(--blue); background: #fff; box-shadow: 0 0 0 4px rgba(61,214,255,.35), inset 0 3px 0 rgba(27,20,64,.06); }
+  input::placeholder { color: #a39cc4; }
+
+  /* onglets : contrôle segmenté */
+  .tabs { gap: 0; padding: 4px; background: rgba(27,20,64,.07); border: 3px solid var(--line); border-radius: var(--r-md); }
+  .tab { border: 0; border-radius: var(--r-sm); background: transparent; padding: 8px 10px; transition: background .15s, transform .15s; }
+  .tab:hover { background: rgba(255,255,255,.7); }
+  .tab.on { background: var(--yellow); box-shadow: 0 0 0 2.5px var(--line), 0 3px 0 2.5px var(--line); transform: translateY(-1px); }
+  .goaltabs { gap: 0; padding: 4px; background: rgba(27,20,64,.07); border: 3px solid var(--line); border-radius: var(--r-md); }
+
+  /* logo et accroche */
+  .logo { font-size: 82px; filter: drop-shadow(0 14px 18px rgba(20,8,70,.35)); }
+  .logo.small { font-size: 44px; }
+  .tag { display: table; margin: 16px auto 28px; padding: 8px 18px; border-radius: 999px; font-size: 16px; font-weight: 800;
+    background: rgba(27,20,64,.28); border: 2px solid rgba(255,255,255,.25); backdrop-filter: blur(6px); text-shadow: none; }
+
+  /* jetons d'avatar : le même personnage qu'en jeu (couleur du joueur, volume, reflet, assiette claire sous l'emoji) */
+  .token { position: relative; border-radius: 50%; border: 3px solid var(--line); flex: none;
+    background:
+      radial-gradient(circle at 50% 54%, rgba(255,255,255,.62) 0 52%, transparent 53%),
+      radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--pc, #ffd23f) 45%, #fff) 0 22%, var(--pc, #ffd23f) 58%, color-mix(in srgb, var(--pc, #ffd23f) 68%, #1b1440) 100%);
+    box-shadow: 0 4px 0 var(--line), inset 0 -3px 0 rgba(27,20,64,.18); }
+  .token::after { content: ''; position: absolute; left: 16%; top: 12%; width: 26%; height: 14%; border-radius: 50%; background: rgba(255,255,255,.7); transform: rotate(-30deg); pointer-events: none; }
+  .pl .av.token { width: 46px; height: 46px; font-size: 26px; display: inline-flex; align-items: center; justify-content: center; }
+  .avbig.token { width: 84px; height: 84px; font-size: 46px; }
+  .pill .av, .fchip .av { background: radial-gradient(circle at 50% 40%, #fff, #eae6ff); box-shadow: inset 0 -2px 0 rgba(27,20,64,.15); }
+
+  /* accueil */
+  .homegrid { gap: 22px; }
+  .avgrid button { border-radius: var(--r-sm); transition: transform .12s, background .12s; }
+  .avgrid button:hover { transform: translateY(-2px) scale(1.06); background: #fff8d6; }
+  .sep { display: flex; align-items: center; gap: 10px; }
+  .sep::before, .sep::after { content: ''; flex: 1; height: 2px; background: rgba(27,20,64,.12); border-radius: 2px; }
+
+  /* salon : un code en ticket, des joueurs en cartes à leur couleur */
+  .code { display: inline-block; margin: 8px 0 12px; padding: 6px 18px 2px 28px; border: 3px dashed rgba(27,20,64,.35); border-radius: var(--r-md); background: rgba(255,210,63,.12); }
+  .pl { padding: 8px 12px 8px 8px; border: 2.5px solid var(--line); border-left: 8px solid var(--pc, var(--line)); border-radius: var(--r-md); gap: 12px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--pc, #fff) 14%, #fff), #fff 55%); box-shadow: 0 3px 0 var(--line); }
+  .pl.me { background: linear-gradient(90deg, color-mix(in srgb, var(--pc, #fff) 30%, #fff), #fff8dc 70%); }
+  .pl.bot { border-style: dashed; border-left-style: solid; }
+  .pl.off { opacity: .55; filter: grayscale(.6); }
+  .pl .nm { font-size: 16px; }
+  .tagchip { display: inline-block; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .8px; color: var(--ink2);
+    background: rgba(27,20,64,.08); border-radius: 6px; padding: 2px 6px; vertical-align: middle; }
+  .lv { border-radius: 8px; padding: 3px 6px; box-shadow: 0 2px 0 rgba(27,20,64,.35); }
+  .mode { border-radius: var(--r-md); box-shadow: 0 4px 0 var(--line), var(--gloss); padding: 12px 6px; }
+  .mode:hover { transform: translateY(-2px); }
+  .mode.on { background: linear-gradient(180deg, #8eeaff, var(--blue)); }
+  .gcard { border-radius: var(--r-md); box-shadow: 0 4px 0 var(--line), inset 0 2px 0 #fff; padding: 12px; }
+  .gcard .i { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; background: rgba(27,20,64,.06); border: 2px solid rgba(27,20,64,.12); }
+  .gcard.on { background: linear-gradient(180deg, #f2fffa, #dcfff0); }
+  .gcard.on .i { background: #fff; border-color: rgba(46,229,157,.6); }
+  .gcard:not(.on) { filter: grayscale(.9); opacity: .5; }
+  .stepper .n { border-radius: var(--r-md); box-shadow: inset 0 3px 0 rgba(27,20,64,.06); }
+  .result { border-radius: var(--r-md); box-shadow: var(--lift), var(--glow), var(--gloss); }
+
+  /* en jeu : barre de score plus légère, écran de jeu en « console » */
+  #scorebar { padding: 12px 16px; }
+  .fchip { box-shadow: 0 3px 0 var(--line); }
+  .fchip.lead { box-shadow: 0 3px 0 var(--line), 0 0 0 4px rgba(255,210,63,.6); }
+  .screen-dark { border-radius: 20px; padding: 10px; background: radial-gradient(circle at 50% 0%, #241c52, var(--screen) 70%);
+    box-shadow: inset 0 0 0 3px #2c2560, inset 0 0 40px rgba(0,0,0,.35), 0 10px 30px -14px rgba(0,0,0,.6); }
+  canvas { border-radius: 12px; }
+  #gamehdr { border-bottom-style: solid; border-bottom-color: rgba(27,20,64,.08); }
+
+  /* fenêtres et cartes de résultat */
+  #overlay, .modal, #custom, #gamesModal, #confirmBox { background: radial-gradient(circle at 50% 30%, rgba(60,34,140,.62), rgba(20,12,52,.86)); backdrop-filter: blur(8px); }
+  .ovcard { padding: 26px 24px 24px; }
+  #ovTitle { font-size: 44px; letter-spacing: .5px; }
+  .standings > div { border-radius: var(--r-md); box-shadow: 0 3px 0 var(--line); }
+  .keys { border-radius: var(--r-md); }
+  #ovText.goal { border-radius: var(--r-md); }
+  .countbub { box-shadow: 0 6px 0 var(--line), 0 0 0 10px rgba(255,95,162,.25); }
+  .toast { border-radius: var(--r-md); box-shadow: 0 5px 0 var(--line), var(--glow); }
+
+  @media (max-width: 760px) {
+    .logo { font-size: 58px; }
+    .card { padding: 16px; border-radius: 22px; }
+    .tag { font-size: 14px; margin-bottom: 20px; }
+    .pl .av.token { width: 40px; height: 40px; font-size: 22px; }
+  }
+  /* chacun pour soi sur téléphone : les joueurs sur toute la largeur, la manche en dessous */
+  @media (max-width: 560px) {
+    #scorebar:has(.ffachips) { flex-direction: column; align-items: stretch; gap: 8px; }
+    #scorebar .ffachips { justify-content: center; }
+  }
+  @media (prefers-reduced-motion: reduce) { .tab, input, .avgrid button { transition: none; } }
 </style>
 </head>
 <body>
@@ -527,9 +643,9 @@
             <button id="btnForgotBack" class="linkbtn" type="button">← Retour à la connexion</button>
           </div>
           <p id="aErr" class="err"></p>
-          <div class="sep">— ou joue en invité, sans XP —</div>
+          <div class="sep">ou joue en invité, sans XP</div>
           <div class="avpick">
-            <div class="avbig" id="avBig" title="Changer d'avatar">🦊</div>
+            <div class="avbig token" id="avBig" title="Changer d'avatar" style="--pc:#ffd23f">🦊</div>
             <div class="grow"><input id="name" maxlength="16" placeholder="Pseudo invité" autocomplete="off"></div>
           </div>
           <div class="avgrid hidden" id="avGrid"></div>
@@ -540,7 +656,7 @@
         <div class="card">
           <div class="lbl">🎮 Jouer</div>
           <button id="btnCreate" class="btn big" style="width:100%">🎉 Créer un salon</button>
-          <div class="sep">— ou rejoindre avec un code —</div>
+          <div class="sep">ou rejoindre avec un code</div>
           <div class="row">
             <input id="code" class="grow" maxlength="4" placeholder="CODE" autocomplete="off" style="text-transform:uppercase;letter-spacing:6px;text-align:center;font-family:var(--display)">
             <button id="btnJoin" class="btn pink">Rejoindre</button>
@@ -615,6 +731,7 @@
 </div>
 <script src="cosmetics.js"></script>
 <script src="gags.js"></script>
+<script src="heroes.js"></script>
 <script src="fx.js"></script>
 <script src="app.js"></script>
 <script src="account.js"></script>

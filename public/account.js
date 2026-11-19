@@ -97,7 +97,7 @@ function renderAccount() {
   const span = me.xpNext - me.xpLevel, into = me.xp - me.xpLevel;
   const st = me.stats || { matches: 0, wins: 0, rounds: 0 };
   $('#acctIn').innerHTML = `<div class="profile">
-      <div class="avbig fr-${me.frame}" style="--pc:#ffd23f">${esc(me.avatar)}</div>
+      <div class="avbig token fr-${me.frame}" style="--pc:#ffd23f">${esc(me.avatar)}</div>
       <div class="grow">
         <div class="pname">${esc(me.name)} <span class="lv big">Nv ${me.level}</span></div>
         ${me.title ? `<div class="ptitle">« ${esc(COSMETICS.titleName(me.title))} »</div>` : ''}

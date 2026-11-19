@@ -370,8 +370,10 @@ function renderLobby() {
   const isTeam = r.mode === '2v2' || r.mode === '3v3';
   const canAdd = (m) => me && m.uid && m.uid !== me.id && friendsData && !friendsData.friends.some((f) => f.id === m.uid) && !friendsData.reqOut.some((f) => f.id === m.uid);
   const botTools = (m) => (host && m.bot ? `${isTeam ? `<button class="btn sm white" data-botteam="${m.id}" data-to="${1 - m.team}" title="Changer d'équipe">⇄</button>` : ''}<button class="btn sm white" data-delbot="${m.id}" title="Retirer ce bot">✖</button>` : '');
-  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''} ${m.offline ? 'off' : ''} ${m.bot ? 'bot' : ''}"><span class="av fr-${m.frame || 'classic'}" style="--pc:#ffd23f">${esc(m.avatar)}</span>
-    <span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}${m.bot ? ' <span class="mut" style="font-size:11px">bot</span>' : m.level ? ` <span class="lv">${m.level}</span>` : ' <span class="mut" style="font-size:11px">invité</span>'}
+  // couleur du joueur = celle qu'il aura en jeu (palette par ordre d'arrivée, ou couleur d'équipe)
+  const pc = (m) => (isTeam ? TEAMC[m.team] : PALETTE[r.members.indexOf(m) % PALETTE.length]);
+  const row = (m) => `<div class="pl ${m.id === r.you ? 'me' : ''} ${m.offline ? 'off' : ''} ${m.bot ? 'bot' : ''}" style="--pc:${pc(m)}"><span class="av token fr-${m.frame || 'classic'}">${esc(m.avatar)}</span>
+    <span class="nm">${esc(m.name)}${m.id === r.you ? ' (toi)' : ''}${m.bot ? ' <span class="tagchip">bot</span>' : m.level ? ` <span class="lv">${m.level}</span>` : ' <span class="tagchip">invité</span>'}
     ${m.title ? `<small class="ptitle">${esc(COSMETICS.titleName(m.title))}</small>` : ''}</span>
     ${m.offline ? '<span title="Déconnecté, on l\'attend">🔌</span>' : ''}${canAdd(m) ? `<button class="btn sm white" data-addfriend="${esc(m.name)}" title="Ajouter en ami">➕</button>` : ''}${botTools(m)}${m.id === r.host ? '👑' : ''}</div>`;
   const full = r.members.length >= 10;
@@ -748,17 +750,19 @@ function sawblade(c, x, y, r, rot) {
   c.fillStyle = '#ff4d6d'; c.beginPath(); c.arc(0, 0, r * 0.22, 0, 7); c.fill(); c.stroke();
   c.restore();
 }
+// personnage du joueur i (rendu commun de heroes.js) ; o.vx/o.vy = déplacement en px par image
+function hero(c, i, x, y, r, o = {}) {
+  const p = P(i);
+  Hero.draw(c, { x, y, r, color: p.color, avatar: p.avatar, frame: p.frame, me: i === M.me, bob: i * 1.7, ...o });
+}
 function drawPlayersAt(c, S, a, PR, offX = 0, extra) {
   const A = S.prev.d.p, B = S.cur.d.p;
   B.forEach((p, i) => {
     const pp = A[i] || p;
     const x = lerp(pp[0], p[0], a) - offX, y = lerp(pp[1], p[1], a);
-    if (!p[2]) { c.font = '24px serif'; c.textAlign = 'center'; c.fillText('💀', x, y + 8); return; }
-    c.beginPath(); c.arc(x, y, PR + 4, 0, 7); c.fillStyle = P(i).color; c.fill();
-    c.lineWidth = 3; c.strokeStyle = i === M.me ? '#fff' : '#1b1440'; c.stroke();
-    c.font = '16px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, x, y + 6);
-    strokeText(c, P(i).name, x, y - PR - 9, P(i).color, 12);
-    if (extra) extra(i, x, y);
+    // les instantanés arrivent toutes les ~34 ms (≈ 2 images) : on ramène la vitesse à une image
+    hero(c, i, x, y, PR + 4, { dead: !p[2], vx: (p[0] - pp[0]) / 2, vy: (p[1] - pp[1]) / 2, name: P(i).name });
+    if (extra && p[2]) extra(i, x, y);
   });
 }
 // déplacement au clavier (+ bousculade optionnelle) partagé par les jeux d'arène
@@ -856,10 +860,10 @@ GAMES.seq = {
         const x = i * lw + lw / 2, st = lerp(A.pos[i], p, a), yy = Math.max(46, y(st));
         strokeText(c, P(i).name, x, 16, P(i).color, n > 6 ? 11 : 13);
         strokeText(c, `${Math.floor(p)} 🪜`, x, 32, '#fff', 11);
-        if (!B.al[i]) { c.font = '26px serif'; c.textAlign = 'center'; c.fillText('🩸', x, H - 10); return; }
-        c.font = '30px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, x, yy);
-        if (y(st) < 46) strokeText(c, '▲', x, yy - 30, '#ffd23f', 14); // hors écran par le haut
-        if (i === M.me) { c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x, yy - 10, 21, 0, 7); c.stroke(); }
+        if (!B.al[i]) { Hero.emoji(c, '🩸', x, H - 20, 26); return; }
+        // grimpe = étirement vertical (vitesse de montée entre deux instantanés)
+        hero(c, i, x, yy - 10, Math.min(18, lw * 0.32), { vy: (y(st) - y(A.pos[i])) / 3 });
+        if (y(st) < 46) strokeText(c, '▲', x, yy - 34, '#ffd23f', 14); // hors écran par le haut
       });
     };
     draw();
@@ -934,7 +938,7 @@ GAMES.filter = {
       // four (en bas à gauche) et caisse (en haut à droite), comme les boutons
       const fl = c.createLinearGradient(0, 200, 0, 280); fl.addColorStop(0, '#ffd23f'); fl.addColorStop(0.5, '#ff9f1c'); fl.addColorStop(1, '#ff4d6d');
       c.fillStyle = fl; c.fillRect(ZX - 250, 205, 150, 75);
-      for (let k = 0; k < 7; k++) { c.font = '22px serif'; c.textAlign = 'center'; c.fillText('🔥', ZX - 240 + k * 22, 276 - Math.abs(Math.sin(now / 120 + k)) * 14); }
+      for (let k = 0; k < 7; k++) { c.font = '22px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('🔥', ZX - 240 + k * 22, 276 - Math.abs(Math.sin(now / 120 + k)) * 14); }
       strokeText(c, '⬅ FOUR (ferraille)', ZX - 175, 228, '#fff', 14);
       c.fillStyle = '#c98b4a'; c.strokeStyle = '#1b1440'; c.lineWidth = 3;
       c.fillRect(ZX + 110, 14, 150, 62); c.strokeRect(ZX + 110, 14, 150, 62);
@@ -1154,8 +1158,8 @@ GAMES.manners = {
       c.fillStyle = '#5e381f'; c.fillRect(0, 280, W, 8);
       // tableau de cerf + horloge
       c.fillStyle = '#5e381f'; c.fillRect(60, 40, 120, 90); c.fillStyle = '#c9b48a'; c.fillRect(70, 50, 100, 70);
-      c.font = '44px serif'; c.textAlign = 'center'; c.fillText('🦌', 120, 102);
-      c.font = '46px serif'; c.fillText('🕰️', 720, 100);
+      c.font = '44px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('🦌', 120, 102);
+      c.font = '46px ' + EMOJI_FONT; c.fillText('🕰️', 720, 100);
       // lustre qui se balance
       const sw = Math.sin(t * 1.3) * 0.06;
       c.save(); c.translate(CX, 0); c.rotate(sw);
@@ -1203,7 +1207,7 @@ GAMES.manners = {
         c.font = '900 13px Georgia, serif'; c.fillText('LIBÉRÉ', -62, -34);
         c.fillStyle = '#9a96a8'; for (let k = 0; k < 6; k++) { c.fillRect(-112, -20 + k * 14, 96, 6); c.fillRect(14, -66 + k * 14, 96, 6); }
         c.fillStyle = '#c9c4d6'; c.fillRect(20, 22, 90, 46);
-        c.font = '30px serif'; c.fillText('🍷', 65, 56);
+        Hero.emoji(c, '🍷', 65, 46, 30);
         c.fillStyle = '#f1c27d'; c.beginPath(); c.arc(-125, 18, 14, 0, 7); c.arc(125, 18, 14, 0, 7); c.fill();
         c.restore();
         if (ph === 'rustle') strokeText(c, '*froisse froisse*', CX + 180, 120, '#ff9f1c', 18);
@@ -1237,9 +1241,9 @@ GAMES.manners = {
         }
         // la tête du convive (vue de dos) et sa fourchette
         const bob = eating ? Math.sin(now / 70) * 5 : 0;
-        c.font = Math.round(46 * sc) + 'px serif'; c.textAlign = 'center';
-        c.fillText(alive ? P(i).avatar : '💀', x, 462 + bob);
-        if (eating) { c.font = '26px serif'; c.fillText('🍴', x + 26, py - 4 - Math.abs(Math.sin(now / 90)) * 30); }
+        // le convive : son personnage, qui se penche sur l'assiette quand il mange
+        hero(c, i, x, 446 + bob, 24 * sc, { dead: !alive, shadow: false, vy: eating ? Math.cos(now / 70) * 2 : 0 });
+        if (eating) Hero.emoji(c, '🍴', x + 26, py - 12 - Math.abs(Math.sin(now / 90)) * 30, 26);
         if (pr >= 100 && alive) strokeText(c, '🏁 FINI', x, py - 34, '#2ee59d', 16);
         strokeText(c, P(i).name + (i === M.me ? ' (toi)' : ''), x, 300 + 22 - 6, P(i).color, n > 6 ? 11 : 13);
         c.fillStyle = '#1b1440'; c.fillRect(x - 32, py + 26, 64, 7);
@@ -1249,7 +1253,7 @@ GAMES.manners = {
       const sinceBang = now - this.bangT;
       if (sinceBang < 260) {
         c.fillStyle = `rgba(255,255,255,${0.8 * (1 - sinceBang / 260)})`; c.fillRect(0, 0, W, H);
-        c.font = '70px serif'; c.textAlign = 'center'; c.fillText('💥', CX, 250);
+        c.font = '70px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('💥', CX, 250);
       }
       if (ph === 'look') {
         const a = 0.18 + 0.1 * Math.sin(now / 90);
@@ -1294,8 +1298,9 @@ GAMES.bomb = {
         if (i !== B.h) return;
         const pulse = 1 + 0.15 * Math.sin(now / (B.f <= 3 ? 60 : 160));
         c.strokeStyle = '#ff4d6d'; c.lineWidth = 4; c.beginPath(); c.arc(x, y, (this.PR + 12) * pulse, 0, 7); c.stroke();
-        c.font = '26px serif'; c.textAlign = 'center'; c.fillText('🕷️', x, y - 30);
-        strokeText(c, String(B.f), x + 24, y - 30, B.f <= 3 ? '#ff4d6d' : '#ffd23f', 20);
+        // l'araignée s'accroche au flanc du porteur (le dessus est réservé au nom)
+        Hero.emoji(c, '🕷️', x - this.PR - 10, y - this.PR + 2 + Math.sin(now / 90) * 2, 26);
+        strokeText(c, String(B.f), x + this.PR + 14, y - this.PR + 8, B.f <= 3 ? '#ff4d6d' : '#ffd23f', 20);
       });
       this.booms = this.booms.filter((b) => now - b.t < 700);
       this.booms.forEach((b) => { const k = (now - b.t) / 700; c.globalAlpha = 1 - k; c.fillStyle = '#ff9f1c'; c.beginPath(); c.arc(b.x, b.y, 20 + k * 120, 0, 7); c.fill(); c.globalAlpha = 1; });
@@ -1333,7 +1338,7 @@ GAMES.mines = {
       c.fillStyle = 'rgba(0,0,0,.12)';
       for (let x = -(camX % 60); x < W; x += 60) for (let y = 15; y < this.H; y += 60) { c.beginPath(); c.arc(x + ((y / 60) % 2) * 30, y, 6, 0, 7); c.fill(); }
       this.craters.forEach(([x, y]) => { c.fillStyle = '#2b1d0e'; c.beginPath(); c.ellipse(x - camX, y, 26, 18, 0, 0, 7); c.fill(); });
-      this.known.forEach(([x, y]) => { c.font = '22px serif'; c.textAlign = 'center'; c.fillText('💣', x - camX, y + 8); c.strokeStyle = 'rgba(255,77,109,.7)'; c.lineWidth = 2; c.beginPath(); c.arc(x - camX, y, 16, 0, 7); c.stroke(); });
+      this.known.forEach(([x, y]) => { c.font = '22px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('💣', x - camX, y + 8); c.strokeStyle = 'rgba(255,77,109,.7)'; c.lineWidth = 2; c.beginPath(); c.arc(x - camX, y, 16, 0, 7); c.stroke(); });
       const fx = this.L - 30 - camX;
       for (let k = 0; k < this.H / 14; k++) { c.fillStyle = k % 2 ? '#fff' : '#1b1440'; c.fillRect(fx, k * 14, 10, 14); }
       // moissonneuse
@@ -1341,7 +1346,7 @@ GAMES.mines = {
       if (hv > -60) {
         c.fillStyle = '#ff4d6d'; c.fillRect(0, 0, Math.max(0, hv), this.H);
         for (let y = 0; y < this.H; y += 40) sawblade(c, hv + 10, y + 20, 18, now / 60 + y);
-        c.font = '50px serif'; c.textAlign = 'center'; c.fillText('🚜', Math.max(30, hv - 30), this.H / 2 + 16);
+        c.font = '50px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('🚜', Math.max(30, hv - 30), this.H / 2 + 16);
       }
       // sonar
       B.p.forEach((p, i) => {
@@ -1433,8 +1438,8 @@ GAMES.tron = {
             strokeText(c, dir, x + (dir === '➡' ? C * 2.5 : dir === '⬅' ? -C * 2.5 : 0), y + (dir === '⬇' ? C * 2.8 : dir === '⬆' ? -C * 1.8 : 6), '#ffd23f', 26);
           }
         }
-        c.font = `${C * 1.3}px serif`; c.textAlign = 'center';
-        c.fillText(P(i).avatar, x, y - C * 0.9);
+        // le pilote en tête de sa trace
+        hero(c, i, x, y, Math.max(7, C * 0.95), { shadow: false, me: false });
       });
     };
     draw();
@@ -1532,7 +1537,7 @@ GAMES.dodge = {
         }
         c.restore();
       });
-      c.font = '26px serif'; c.textAlign = 'center'; c.fillText('👁️', W / 2, H / 2 + 9);
+      Hero.emoji(c, '👁️', W / 2, H / 2, 26);
       B.b.forEach((b, k) => {
         const pb = A.b[k] || b;
         const x = lerp(pb[0], b[0], a), y = lerp(pb[1], b[1], a), r = b[2];
@@ -1543,11 +1548,7 @@ GAMES.dodge = {
       B.p.forEach((p, i) => {
         const pp = A.p[i] || p;
         const x = lerp(pp[0], p[0], a), y = lerp(pp[1], p[1], a);
-        if (!p[2]) { c.font = '24px serif'; c.textAlign = 'center'; c.fillText('💀', x, y + 8); return; }
-        c.beginPath(); c.arc(x, y, PR + 4, 0, 7); c.fillStyle = P(i).color; c.fill();
-        c.lineWidth = 3; c.strokeStyle = i === M.me ? '#fff' : '#1b1440'; c.stroke();
-        c.font = '16px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, x, y + 6);
-        strokeText(c, P(i).name, x, y - PR - 9, P(i).color, 12);
+        hero(c, i, x, y, PR + 4, { dead: !p[2], vx: (p[0] - pp[0]) / 2, vy: (p[1] - pp[1]) / 2, name: P(i).name });
       });
       drawFx(c, this);
       strokeText(c, `⏱ ${B.tm.toFixed(1)} s`, 52, 28, '#fff', 18);
@@ -1601,8 +1602,9 @@ GAMES.race = {
       // mini-carte
       c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5;
       c.beginPath(); c.roundRect(20, 32, Wc - 40, 10, 5); c.fill(); c.stroke();
-      c.font = '16px serif'; c.textAlign = 'center'; c.fillText('🏁', Wc - 22, 30);
-      B.forEach((r, i) => { const mx = 20 + (Wc - 40) * Math.min(1, xs[i] / L); c.font = (i === M.me ? 20 : 15) + 'px serif'; c.fillText(P(i).avatar, mx, 46); });
+      Hero.emoji(c, '🏁', Wc - 22, 24, 16);
+      B.forEach((r, i) => { const mx = 20 + (Wc - 40) * Math.min(1, xs[i] / L); if (i !== M.me) hero(c, i, mx, 37, 7, { shadow: false, me: false }); });
+      { const mx = 20 + (Wc - 40) * Math.min(1, xs[M.me] / L); hero(c, M.me, mx, 37, 10, { shadow: false }); } // moi par-dessus
       B.forEach((r, i) => {
         const y0 = 50 + i * LH, gy = y0 + LH - 12;
         c.fillStyle = i % 2 ? '#e0673e' : '#e8744a'; c.fillRect(0, y0, Wc, LH);
@@ -1624,9 +1626,9 @@ GAMES.race = {
         const jy = ys[i] * 0.33;
         const hop = jy ? 0 : Math.abs(Math.sin(xs[i] / 14)) * 5;
         c.fillStyle = 'rgba(27,20,64,.3)'; c.beginPath(); c.ellipse(sx, gy, 14 - jy / 6, 4, 0, 0, 7); c.fill();
-        c.font = '30px serif'; c.textAlign = 'center'; c.fillText(P(i).avatar, sx, gy - 6 - jy - hop);
-        if (i === M.me) { c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(sx, gy - 16 - jy - hop, 20, 0, 7); c.stroke(); }
-        if (B[i][2]) { c.font = '20px serif'; c.fillText('💫', sx, gy - 40 - jy); }
+        // le coureur : penché vers l'avant, étiré en saut, écrasé à la réception
+        hero(c, i, sx, gy - 16 - jy - hop, 15, { shadow: false, vx: 3, vy: jy ? -2 : hop < 1 ? 1 : 0 });
+        if (B[i][2]) Hero.emoji(c, '💫', sx, gy - 46 - jy, 20);
         if (off) strokeText(c, off === 'left' ? '◀' : '▶', off === 'left' ? 8 : Wc - 8, gy - 18, '#fff', 16);
         c.textAlign = 'left'; c.font = '800 13px Nunito, system-ui'; c.lineWidth = 3; c.strokeStyle = '#1b1440';
         const lbl = P(i).name + (i === M.me ? ' (toi)' : '') + (xs[i] >= L ? ' 🏁' : '');
@@ -1973,7 +1975,8 @@ function drawCar(c, cx, by, w, color, avatar, tilt = 0) {
   c.beginPath(); c.roundRect(-w * 0.3, -h, w * 0.6, h * 0.32, w * 0.08); c.fill(); c.stroke();
   c.fillStyle = 'rgba(255,255,255,.75)'; c.fillRect(-w * 0.24, -h * 0.94, w * 0.48, h * 0.2);
   c.fillStyle = '#ff4d6d'; c.fillRect(-w * 0.45, -h * 0.62, w * 0.12, h * 0.1); c.fillRect(w * 0.33, -h * 0.62, w * 0.12, h * 0.1);
-  if (w > 26) { c.font = Math.round(h * 0.26) + 'px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText(avatar, 0, -h * 0.75); }
+  // le pilote dépasse du cockpit : son personnage, en petit
+  if (w > 26) Hero.draw(c, { x: 0, y: -h * 0.86, r: h * 0.2, color, avatar, shadow: false, t: performance.now() / 1000 });
   c.restore();
 }
 GAMES.circuit = {
@@ -2270,8 +2273,8 @@ GAMES.snake = {
         path(); c.strokeStyle = P(i).color; c.lineWidth = C * 0.82; c.stroke();
         path(); c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = C * 0.22; c.setLineDash([C * 0.3, C * 0.7]); c.stroke(); c.setLineDash([]);
         const [hx, hy] = head;
-        c.fillStyle = P(i).color; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5; c.beginPath(); c.arc(hx, hy, C * 0.58, 0, 7); c.fill(); c.stroke();
-        c.font = Math.round(C * 0.85) + 'px ' + EMOJI_FONT; c.fillStyle = '#000'; c.fillText(P(i).avatar, hx, hy + C * 0.3);
+        // la tête du serpent = le personnage du joueur, étiré dans le sens de la marche
+        hero(c, i, hx, hy, C * 0.62, { shadow: false, me: false, vx: (cen(body[0])[0] - cen(prev[0])[0]) * 0.08, vy: (cen(body[0])[1] - cen(prev[0])[1]) * 0.08 });
         if (i === M.me) {
           c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(hx, hy, C * (1 + 0.2 * Math.sin(now / 120)), 0, 7); c.stroke();
           if (!this.started) strokeText(c, '▼ TOI ▼', hx, Math.max(16, hy - C * 1.4), '#fff', 15);
@@ -2332,13 +2335,12 @@ GAMES.flap = {
       order.forEach((i) => {
         const p = B.p[i], pp = A.p[i] || p, y = lerp(pp[0], p[0], a), x = this.BX;
         c.globalAlpha = i === M.me ? 1 : 0.45;
-        if (!p[1]) { c.font = '24px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText('💀', x, y + 8); c.globalAlpha = 1; return; }
-        const up = p[2];
-        c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2;
-        c.beginPath(); c.moveTo(x - 6, y); c.lineTo(x - 26, y + (up ? -16 : 10)); c.lineTo(x - 10, y + 8); c.closePath(); c.fill(); c.stroke();
-        c.beginPath(); c.arc(x, y, this.BR + 3, 0, 7); c.fillStyle = P(i).color; c.fill(); c.lineWidth = 3; c.strokeStyle = i === M.me ? '#fff' : '#1b1440'; c.stroke();
-        c.font = '16px ' + EMOJI_FONT; c.textAlign = 'center'; c.fillText(P(i).avatar, x, y + 6);
-        if (i === M.me) strokeText(c, 'TOI', x, y - this.BR - 10, '#fff', 12);
+        if (!p[1]) { hero(c, i, x, y, this.BR + 3, { dead: true, shadow: false }); c.globalAlpha = 1; return; }
+        const up = p[2], R = this.BR + 3;
+        // aile arrière (bat vers le haut au coup d'aile), puis le personnage, penché selon sa chute
+        c.fillStyle = '#fff'; c.strokeStyle = '#1b1440'; c.lineWidth = 2.5; c.lineJoin = 'round';
+        c.beginPath(); c.moveTo(x - R * 0.3, y); c.quadraticCurveTo(x - R * 1.6, y + (up ? -R * 1.5 : R * 0.2), x - R * 1.9, y + (up ? -R * 0.9 : R * 0.9)); c.quadraticCurveTo(x - R * 1.1, y + R * 0.3, x - R * 0.4, y + R * 0.55); c.closePath(); c.fill(); c.stroke();
+        hero(c, i, x, y, R, { vx: 1.5, vy: (p[0] - pp[0]) / 2, shadow: false, name: i === M.me ? 'TOI' : null });
         c.globalAlpha = 1;
       });
       const passed = this.gates.filter(([x]) => x + this.PW < this.BX + d).length;
