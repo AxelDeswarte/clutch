@@ -643,6 +643,9 @@ wss.on('connection', (ws, req) => {
       case 'logout':
         setUser(S, null);
         return;
+      case 'ping': // mesure du temps d'aller-retour (prédiction locale côté navigateur)
+        reply({ t: 'pong', c: Number(m.c) || 0 });
+        return;
       case 'forgot': {
         if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
         const r = ACC.startReset(m.email);

@@ -12,6 +12,7 @@
 //   room.survivalOver(alive)   true si tous les survivants sont du même camp (ou personne)
 //   room.finish(scores, why)   termine la manche ; scores[i] plus haut = mieux classé
 
+const GunPhys = require('./public/gunphys');
 const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const shuffle = (arr) => {
@@ -1223,9 +1224,7 @@ GAMES.gun = {
   rules: "Duel de plateformes. Tes balles tombent avec la gravité : vise un peu au-dessus de loin. Chaque tir te repousse et projette la cible. 2 vies de 100 PV, 3 balles par chargeur. Tomber dans le vide coûte une vie. Dernier camp debout gagne.",
   create(room) {
     const n = room.n, W = 800, H = 480, NET = 1 / 30, DT = 1 / 60;
-    const PW = 13, PH = 15; // demi-largeur / demi-hauteur du joueur
-    const G = 1600, RUN = 270, ACC_G = 3000, ACC_A = 1700, FRIC = 2600, JUMP = 610, CUT = 0.45;
-    const COYOTE = 0.1, BUFFER = 0.13, WALL_SLIDE = 150, WALL_JX = 360, WALL_JY = 560;
+    const { PW, PH, BUFFER } = GunPhys.K; // demi-largeur / demi-hauteur du joueur, saut mémorisé
     const BSP = 860, BG = 950, BR = 4, DMG = 34, CD = 0.26, MAG = 3, RELOAD = 1.3, RECOIL = 210, KNOCK = 330;
     const LIVES = 2, HP = 100, RESPAWN = 1.2, INV = 1.1;
     const map = pick(GUN_MAPS);
@@ -1255,61 +1254,18 @@ GAMES.gun = {
     const deathT = new Array(n).fill(0);
     let bullets = [], t = 0;
 
-    const solidHit = (x, y, w, h) => rects.find((r) => !r.one && x + w > r.x && x - w < r.x + r.w && y + h > r.y && y - h < r.y + r.h);
+    const world = { W, rects };
+    const solidHit = (x, y, w, h) => GunPhys.solidHit(rects, x, y, w, h);
+    // physique partagée avec le navigateur (public/gunphys.js) : la prédiction locale suit exactement le serveur
     function physics(p) {
-      // course : accélère vers la vitesse voulue, freine fort au sol quand on lâche
-      const target = p.mx * RUN, acc = p.ground ? ACC_G : ACC_A;
-      if (p.mx) p.vx += Math.sign(target - p.vx) * Math.min(Math.abs(target - p.vx), acc * DT);
-      else if (p.ground) p.vx -= Math.sign(p.vx) * Math.min(Math.abs(p.vx), FRIC * DT);
-      else p.vx *= Math.pow(0.6, DT); // résistance de l'air (garde la projection lisible)
-      // gravité, glissade contre un mur
-      p.vy += G * DT;
-      if (p.wall && !p.ground && p.vy > WALL_SLIDE && p.mx === p.wall) p.vy = WALL_SLIDE;
-      if (p.vy > 1100) p.vy = 1100;
-      // saut : mémorisé un court instant, permis juste après avoir quitté le bord, ou contre un mur
-      p.coyote = p.ground ? COYOTE : p.coyote - DT;
-      p.buf -= DT;
-      if (p.buf > 0) {
-        if (p.coyote > 0) { p.vy = -JUMP; p.buf = 0; p.coyote = 0; p.ground = false; room.send({ t: 'g', k: 'jump', i: pl.indexOf(p) }); }
-        else if (p.wall) { p.vy = -WALL_JY; p.vx = -p.wall * WALL_JX; p.buf = 0; room.send({ t: 'g', k: 'jump', i: pl.indexOf(p), w: 1 }); }
-      }
-      if (!p.jumpHeld && p.vy < 0) p.vy *= Math.pow(CUT, DT * 20); // relâcher = saut plus court
-
-      // déplacement axe par axe avec résolution des collisions
-      p.x += p.vx * DT;
-      p.wall = 0;
-      if (p.x < PW) { p.x = PW; p.vx = 0; p.wall = -1; }
-      if (p.x > W - PW) { p.x = W - PW; p.vx = 0; p.wall = 1; }
-      let r = solidHit(p.x, p.y, PW, PH);
-      if (r) {
-        if (p.vx > 0 || p.x < r.x + r.w / 2) { p.x = r.x - PW; p.wall = 1; } else { p.x = r.x + r.w + PW; p.wall = -1; }
-        p.vx = 0;
-      }
-      const prevBottom = p.y + PH;
-      p.y += p.vy * DT;
-      const wasGround = p.ground;
-      p.ground = false;
-      for (const q of rects) {
-        if (p.x + PW <= q.x || p.x - PW >= q.x + q.w) continue;
-        if (q.one) {
-          // planche : on n'atterrit que par le dessus, en descendant, et pas si on appuie sur ⬇
-          if (p.vy >= 0 && !p.down && prevBottom <= q.y + 1 && p.y + PH >= q.y) { p.y = q.y - PH; p.vy = 0; p.ground = true; }
-          continue;
-        }
-        if (p.y + PH > q.y && p.y - PH < q.y + q.h) {
-          if (p.vy >= 0 && prevBottom <= q.y + 2) { p.y = q.y - PH; p.vy = 0; p.ground = true; }
-          else if (p.vy < 0) { p.y = q.y + q.h + PH; p.vy = 0; }
-        }
-      }
-      if (p.ground) p.wall = 0;
-      if (p.ground && !wasGround && p.vy === 0) p.land = 1;
-      if (p.y < -200) p.y = -200;
+      const ev = GunPhys.step(p, world);
+      if (ev) room.send({ t: 'g', k: 'jump', i: pl.indexOf(p), w: ev === 'wall' ? 1 : 0 });
     }
 
     function damage(i, by, dmg, kx, ky) {
       const p = pl[i];
       p.hp -= dmg; p.vx += kx; p.vy += ky;
-      room.send({ t: 'g', k: 'hit', i, by, hp: Math.max(0, p.hp), l: p.lives, x: Math.round(p.x), y: Math.round(p.y) });
+      room.send({ t: 'g', k: 'hit', i, by, hp: Math.max(0, p.hp), l: p.lives, x: Math.round(p.x), y: Math.round(p.y), kx: Math.round(kx), ky: Math.round(ky) });
       if (p.hp <= 0) loseLife(i, by);
     }
     function loseLife(i, by, fell) {
@@ -1370,7 +1326,7 @@ GAMES.gun = {
 
     return {
       start() {
-        room.send({ t: 'g', k: 'gun', w: W, h: H, pw: PW, ph: PH, br: BR, bs: BSP, bg: BG, map: map.name, pit: map.pit, rects: rects.map((r) => [r.x, r.y, r.w, r.h, r.one ? 1 : 0]) });
+        room.send({ t: 'g', k: 'gun', w: W, h: H, pw: PW, ph: PH, br: BR, bs: BSP, bg: BG, rc: RECOIL, cd: CD, map: map.name, pit: map.pit, rects: rects.map((r) => [r.x, r.y, r.w, r.h, r.one ? 1 : 0]) });
         room.every(step, 1000 / 30);
         room.later(() => room.finish(scores(), 'Temps écoulé : classement aux vies et aux PV restants.'), 120000);
       },

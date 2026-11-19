@@ -30,6 +30,9 @@ const sideColor = (s) => (M.teams ? TEAMC[s] : P(M.sides[s][0]).color);
 
 // ════════════════ réseau ════════════════
 const pending = [];
+// temps d'aller-retour mesuré (ms), utile à la prédiction locale des jeux d'action
+let RTT = 120;
+setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'ping', c: performance.now() })); }, 2000);
 function send(o) {
   if (ws && ws.readyState === 1) return ws.send(JSON.stringify(o));
   if (o.t !== 'input') pending.push(o); // les inputs de jeu périmés ne servent à rien
@@ -213,6 +216,36 @@ function legendSet(i, txt) { const s = document.querySelector(`#legend [data-i="
 function homeSeed() { return 'clutch-' + new Date().toISOString().slice(0, 10); }
 function roomColors(r) { return r.members.map((_, i) => PALETTE[i % PALETTE.length]); }
 FX.init(homeSeed(), null);
+
+// ════════════════ avatars des menus : le personnage dessiné (heroes.js) remplace l'emoji ════════════════
+// Toute vignette d'avatar (salon, scores, classement, amis, choix d'avatar…) est repérée à son apparition
+// dans la page et reçoit le portrait du personnage, au t-shirt de la couleur du joueur quand on la connaît.
+const AV_SEL = '.av, .avbig, .avgrid button[data-a], .citem[data-eq="avatar"] > span:first-child';
+const toHex = (css) => {
+  const m = String(css).match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/);
+  if (!m || (m[4] !== undefined && +m[4] < 0.5)) return null;
+  return '#' + [m[1], m[2], m[3]].map((v) => (+v).toString(16).padStart(2, '0')).join('');
+};
+function paintAvatar(el) {
+  const av = el.textContent.trim();
+  if (!av || !Hero.SPECIES.includes(av)) return;
+  const cs = getComputedStyle(el);
+  let col = cs.getPropertyValue('--pc').trim();
+  if (!/^#/.test(col)) col = toHex(el.parentElement && getComputedStyle(el.parentElement).backgroundColor) || '#ffd23f';
+  const px = Math.min(128, Math.round(Math.max(el.clientWidth, el.clientHeight, 26) * 1.3));
+  el.dataset.pav = av;
+  el.setAttribute('aria-label', av);
+  el.innerHTML = `<img class="pav" alt="" src="${Hero.portrait(av, col, px)}">`;
+}
+function paintAll(root) { if (root.matches && root.matches(AV_SEL)) paintAvatar(root); root.querySelectorAll && root.querySelectorAll(AV_SEL).forEach(paintAvatar); }
+new MutationObserver((muts) => {
+  for (const m of muts) {
+    if (m.type !== 'childList') continue;
+    m.addedNodes.forEach((n) => { if (n.nodeType === 1) paintAll(n); });
+    if (m.target.nodeType === 1 && m.target.matches(AV_SEL)) paintAvatar(m.target);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+requestAnimationFrame(() => paintAll(document.body));
 
 // ════════════════ confettis ════════════════
 // physique de papier : chaque confetti bat (il montre sa tranche puis sa face), freine dans l'air,
@@ -424,6 +457,7 @@ function renderLobby() {
 // ════════════════ messages serveur ════════════════
 function onMsg(m) {
   switch (m.t) {
+    case 'pong': { const r = performance.now() - m.c; if (r >= 0 && r < 3000) RTT += (r - RTT) * (RTT === 120 ? 1 : 0.25); break; }
     case 'error':
       if (isShown('home')) $('#homeErr').textContent = m.msg; else toast('⚠️ ' + m.msg);
       break;
@@ -686,8 +720,35 @@ document.addEventListener('keyup', (e) => { if (active && cur && cur.keyup) cur.
 window.addEventListener('blur', () => { if (cur && cur.blur) cur.blur(); });
 
 // ════════════════ interpolation (jeux temps réel) ════════════════
-function pushSnap(S, data) { S.prev = S.cur || { time: performance.now(), d: data }; S.cur = { time: performance.now(), d: data }; }
-function alphaOf(S) { return Math.max(0, Math.min(1, (performance.now() - S.cur.time) / 34)); }
+// ── interpolation avec tampon de gigue ──
+// Les images du serveur arrivent ~toutes les 33 ms, mais irrégulièrement (réseau, onglet chargé…).
+// On affiche le monde avec un léger retard (≈ 1,6 intervalle) en interpolant entre les deux images
+// qui encadrent ce temps d'affichage : un paquet en retard ne fige plus l'écran, deux paquets groupés
+// ne le font plus sauter. S.last = dernière image reçue (pour comparer dans les gestionnaires de messages) ;
+// après alphaOf(), S.prev / S.cur = les deux images à interpoler.
+function pushSnap(S, data) {
+  const now = performance.now();
+  if (!S.buf) { S.buf = []; S.iv = 33; }
+  const last = S.buf[S.buf.length - 1];
+  if (last) S.iv += (Math.min(120, now - last.t) - S.iv) * 0.1; // intervalle moyen observé
+  // horloge lissée : une image ne peut pas « arriver » plus tôt que la moitié d'un intervalle après la précédente
+  const t = last ? Math.max(now, last.t + S.iv * 0.5) : now;
+  S.buf.push({ t, d: data });
+  if (S.buf.length > 10) S.buf.shift();
+  S.last = data;
+  S.prev = last ? { d: last.d } : { d: data };
+  S.cur = { d: data };
+}
+function alphaOf(S) {
+  const B = S.buf;
+  if (!B || B.length < 2) return 1;
+  const rt = performance.now() - Math.max(40, S.iv * 1.6);
+  let k = B.length - 2;
+  while (k > 0 && B[k].t > rt) k--;
+  const a = B[k], b = B[k + 1];
+  S.prev = a; S.cur = b;
+  return Math.max(0, Math.min(1, (rt - a.t) / Math.max(1, b.t - a.t)));
+}
 const lerp = (a, b, t) => a + (b - a) * t;
 // police des emojis sur canvas : on nomme les polices couleur, sinon certains navigateurs n'affichent rien
 const EMOJI_FONT = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", serif';
@@ -817,7 +878,7 @@ GAMES.seq = {
   msg(m) {
     if (m.k === 'esc') { this.seq = m.seq; this.top = m.top; this.render(); this.loop(); }
     if (m.k === 's') {
-      if (this.S.cur) m.al.forEach((a, i) => { if (!a && this.S.cur.d.al[i]) legendSet(i, '💀'); });
+      if (this.S.last) m.al.forEach((a, i) => { if (!a && this.S.last.al[i]) legendSet(i, '💀'); });
       pushSnap(this.S, m);
       if (m.idx[M.me] > this.idx) { this.idx = m.idx[M.me]; this.render(); }
     }
@@ -1002,7 +1063,7 @@ GAMES.floor = {
     }
     if (m.k === 'drop') { this.holes = true; this.dropT = performance.now(); $('#flt').textContent = '💥 EFFONDREMENT ! Seules les dalles ' + this.sym[this.target] + ' tiennent'; SFX.play('boom'); }
     if (m.k === 'restore') { this.holes = false; (this.crack || []).forEach((k) => { this.tiles[k] = -1; }); this.crack = []; $('#flt').textContent = 'Le sol revient… prochain symbole dans un instant'; }
-    if (m.k === 'shove' && this.S.cur) { const q = this.S.cur.d.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
+    if (m.k === 'shove' && this.S.last) { const q = this.S.last.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
     // chute : on marque l'endroit, pour que tout le monde comprenne qui est tombé et où
     if (m.k === 'fall') {
       this.falls.push({ x: m.x, y: m.y, i: m.i, t: performance.now() });
@@ -1322,8 +1383,8 @@ GAMES.mines = {
     if (m.k === 'mines') { this.L = m.l; this.H = m.h; this.PR = m.pr; this.loop(); }
     if (m.k === 'rev') { m.m.forEach(([k, x, y]) => this.known.set(k, [x, y])); SFX.play('ping'); }
     if (m.k === 'boom') { this.known.delete(m.m); this.craters.push([m.x, m.y]); this.booms.push({ x: m.x, y: m.y, t: performance.now() }); SFX.play('boom'); }
-    if (m.k === 'shove' && this.S.cur) { const q = this.S.cur.d.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
-    if (m.k === 's') { if (this.S.cur) m.p.forEach((p, i) => { if (!p[2] && this.S.cur.d.p[i][2]) legendSet(i, '💀'); }); pushSnap(this.S, m); }
+    if (m.k === 'shove' && this.S.last) { const q = this.S.last.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
+    if (m.k === 's') { if (this.S.last) m.p.forEach((p, i) => { if (!p[2] && this.S.last.p[i][2]) legendSet(i, '💀'); }); pushSnap(this.S, m); }
   },
   loop() {
     const cv = $('#mc'), c = cv.getContext('2d'), W = cv.width;
@@ -1505,9 +1566,9 @@ GAMES.dodge = {
   },
   msg(m) {
     if (m.k === 'dodge') { this.W = m.w; this.H = m.h; this.PR = m.pr; this.loop(); }
-    if (m.k === 'shove' && this.S.cur) { const q = this.S.cur.d.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
+    if (m.k === 'shove' && this.S.last) { const q = this.S.last.p[m.j]; fxText(this, q[0], q[1] - 20, 'POUSSÉ !', '#ff5fa2'); SFX.play('bonk'); }
     if (m.k === 's') {
-      const before = this.S.cur ? this.S.cur.d.p : null;
+      const before = this.S.last ? this.S.last.p : null;
       pushSnap(this.S, m);
       if (before) m.p.forEach((p, i) => { if (!p[2] && before[i][2]) legendSet(i, '💀'); });
     }
@@ -1814,7 +1875,7 @@ GAMES.tank = {
     }
     if (m.k === 'hit') {
       legendSet(m.i, m.l > 0 ? '❤️'.repeat(m.l) : '💀');
-      const q = this.S.cur && this.S.cur.d.p[m.i];
+      const q = this.S.last && this.S.last.p[m.i];
       if (q) { this.booms.push({ x: q[0], y: q[1], t: performance.now(), r: 40 }); fxText(this, q[0], q[1] - 26, m.l > 0 ? 'TOUCHÉ !' : 'DÉTRUIT !', '#ff4d6d'); }
       SFX.play('boom');
     }
@@ -1870,6 +1931,8 @@ GAMES.gun = {
       <p class="sub">Q D courir · Z / Espace sauter · S descendre · souris viser · clic tirer · les pointillés montrent la chute de ta balle</p>`;
     this.S = {}; this.raf = null; this.rects = []; this.fx = []; this.parts = []; this.flash = {}; this.shake = 0;
     this.held = new Set(); this.lastMv = ''; this.aim = 0; this.sentAim = 1e9; this.aimT = 0; this.mouse = null; this.firing = null; this.keyAim = 0;
+    // prédiction locale de mon personnage (voir predict / reconcile)
+    this.P = null; this.hist = []; this.acc = 0; this.inp = { mx: 0, down: false, jumpHeld: false }; this.lastShot = 0;
     const cv = $('#gc');
     const toCanvas = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * (cv.width / r.width), (e.clientY - r.top) * (cv.height / r.height)]; };
     cv.addEventListener('pointermove', (e) => { this.mouse = toCanvas(e); });
@@ -1880,22 +1943,60 @@ GAMES.gun = {
       const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'justify-content:center;margin-top:10px;gap:8px';
       [['⬅', 'left'], ['➡', 'right'], ['⬇', 'down'], ['⤒ Saut', 'jump']].forEach(([l, k]) => {
         const b = document.createElement('button'); b.className = 'btn white'; b.textContent = l; b.style.minWidth = '70px';
-        const on = (v) => (ev) => { ev.preventDefault(); if (k === 'jump') send({ t: 'input', a: 'jump', on: v }); else { v ? this.held.add(k) : this.held.delete(k); this.sendMv(); } };
+        const on = (v) => (ev) => { ev.preventDefault(); if (k === 'jump') this.jump(v); else { v ? this.held.add(k) : this.held.delete(k); this.sendMv(); } };
         b.addEventListener('pointerdown', on(true)); b.addEventListener('pointerup', on(false)); b.addEventListener('pointerleave', on(false));
         row.appendChild(b);
       });
       $('#stage').appendChild(row);
     }
   },
-  me() { const B = this.S.cur && this.S.cur.d; return B ? B.p[M.me] : null; },
+  me() { const B = this.S.last; return B ? B.p[M.me] : null; },
+  // ma position affichée : prédite si possible, sinon celle du serveur
+  myPos() { if (this.P) return [this.P.x, this.P.y]; const p = this.me(); return p ? [p[0], p[1]] : null; },
   sendMv() {
     const x = (this.held.has('right') ? 1 : 0) - (this.held.has('left') ? 1 : 0), down = this.held.has('down');
+    this.inp.mx = active && !dead ? x : 0; this.inp.down = down;
     const k = x + ',' + down;
     if (k !== this.lastMv) { this.lastMv = k; send({ t: 'input', a: 'mv', x, down }); }
   },
+  jump(on) {
+    this.inp.jumpHeld = on;
+    if (on && this.P) this.P.buf = GunPhys.K.BUFFER; // saut prédit : il part tout de suite à l'écran
+    send({ t: 'input', a: 'jump', on });
+  },
+  // ── prédiction : mon personnage avance localement avec la même physique que le serveur (gunphys.js) ──
+  predict(dt, now) {
+    const P = this.P; if (!P) return;
+    if (dt > 0.2) { this.P = null; this.hist = []; this.acc = 0; return; } // onglet ralenti : on repartira de l'image serveur suivante
+    this.acc = Math.min(this.acc + dt, 0.1);
+    const world = { W: this.W, rects: this.rects };
+    while (this.acc >= GunPhys.K.DT) {
+      this.acc -= GunPhys.K.DT;
+      P.mx = this.inp.mx; P.down = this.inp.down; P.jumpHeld = this.inp.jumpHeld;
+      if (GunPhys.step(P, world)) SFX.play('boing');
+      this.hist.push({ t: now, x: P.x, y: P.y });
+    }
+    while (this.hist.length && now - this.hist[0].t > 1500) this.hist.shift();
+  },
+  // réconciliation : l'image du serveur montre où j'étais il y a un aller-retour ; on corrige l'écart en douceur
+  reconcile(p) {
+    if (!p || p[2] !== 1) { this.P = null; this.hist = []; return; }
+    const sv = { x: p[0], y: p[1], vx: p[6] * 10, vy: p[7] * 10, ground: !!p[11], wall: p[12] };
+    if (!this.P) { this.P = { ...sv, coyote: 0, buf: 0, jumpHeld: this.inp.jumpHeld, mx: this.inp.mx, down: this.inp.down }; this.hist = []; return; }
+    const T = performance.now() - RTT;
+    let h = null;
+    for (let k = this.hist.length - 1; k >= 0; k--) { if (this.hist[k].t <= T) { h = this.hist[k]; break; } }
+    if (!h) h = this.hist[0];
+    if (!h) return;
+    const ex = sv.x - h.x, ey = sv.y - h.y;
+    if (Math.hypot(ex, ey) > 70) { Object.assign(this.P, sv); this.hist = []; return; } // trop loin : on se recale
+    const cx = ex * 0.12, cy = ey * 0.12;
+    this.P.x += cx; this.P.y += cy;
+    this.hist.forEach((e) => { e.x += cx; e.y += cy; });
+  },
   // visée : vers la souris (ou ajustée au clavier), envoyée quand elle change assez, 25 fois par seconde au plus
   aimNow(force) {
-    const p = this.me(); if (!p) return;
+    const p = this.myPos(); if (!p) return;
     if (this.mouse) this.aim = Math.atan2(this.mouse[1] - (p[1] - 2), this.mouse[0] - p[0]);
     const now = performance.now();
     if (force || (Math.abs(this.aim - this.sentAim) > 0.02 && now - this.aimT > 40)) {
@@ -1903,11 +2004,23 @@ GAMES.gun = {
       if (active && !dead) send({ t: 'input', a: 'aim', v: Math.round(this.aim * 1000) });
     }
   },
-  startFire() {
+  // tir : envoyé au serveur, et le recul est prédit tout de suite si le tir sera accepté (munitions, cadence)
+  fireNow() {
     if (!active || dead) return;
     send({ t: 'input', a: 'fire' });
+    const p = this.me(), now = performance.now();
+    if (this.P && p && p[9] > 0 && p[10] >= 100 && now - this.lastShot > this.CD * 1000 + 20) {
+      this.lastShot = now;
+      const ca = Math.cos(this.aim), sa = Math.sin(this.aim), gr = this.P.ground;
+      this.P.vx -= ca * this.RC * (gr ? 0.5 : 1);
+      this.P.vy -= sa * this.RC * (gr ? 0.2 : 0.8);
+    }
+  },
+  startFire() {
+    if (!active || dead) return;
+    this.fireNow();
     clearInterval(this.firing);
-    this.firing = setInterval(() => { this.aimNow(true); send({ t: 'input', a: 'fire' }); }, 110); // maintenu = tir dès que possible
+    this.firing = setInterval(() => { this.aimNow(true); this.fireNow(); }, 110); // maintenu = tir dès que possible
   },
   stopFire() { clearInterval(this.firing); this.firing = null; },
   key(e) {
@@ -1915,7 +2028,7 @@ GAMES.gun = {
     if (c === 'KeyA' || c === 'ArrowLeft') { e.preventDefault(); this.held.add('left'); this.sendMv(); }
     else if (c === 'KeyD' || c === 'ArrowRight') { e.preventDefault(); this.held.add('right'); this.sendMv(); }
     else if (c === 'KeyS') { e.preventDefault(); this.held.add('down'); this.sendMv(); }
-    else if (c === 'KeyW' || c === 'Space') { e.preventDefault(); if (!e.repeat) send({ t: 'input', a: 'jump', on: true }); }
+    else if (c === 'KeyW' || c === 'Space') { e.preventDefault(); if (!e.repeat) this.jump(true); }
     else if (c === 'ArrowUp' || c === 'ArrowDown') { e.preventDefault(); this.keyAim = c === 'ArrowUp' ? -1 : 1; this.mouse = null; }
     else if (c === 'Enter' || c === 'KeyF') { e.preventDefault(); if (!e.repeat) { this.aimNow(true); this.startFire(); } }
     else if (c === 'KeyR') send({ t: 'input', a: 'reload' });
@@ -1925,17 +2038,17 @@ GAMES.gun = {
     if (c === 'KeyA' || c === 'ArrowLeft') { this.held.delete('left'); this.sendMv(); }
     else if (c === 'KeyD' || c === 'ArrowRight') { this.held.delete('right'); this.sendMv(); }
     else if (c === 'KeyS') { this.held.delete('down'); this.sendMv(); }
-    else if (c === 'KeyW' || c === 'Space') send({ t: 'input', a: 'jump', on: false });
+    else if (c === 'KeyW' || c === 'Space') this.jump(false);
     else if (c === 'ArrowUp' || c === 'ArrowDown') this.keyAim = 0;
     else if (c === 'Enter' || c === 'KeyF') this.stopFire();
   },
-  blur() { this.held.clear(); this.sendMv(); this.stopFire(); send({ t: 'input', a: 'jump', on: false }); },
+  blur() { this.held.clear(); this.sendMv(); this.stopFire(); this.jump(false); },
   burst(x, y, col, n, sp) {
     for (let k = 0; k < n; k++) { const a = Math.random() * 6.28, v = sp * (0.4 + Math.random()); this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - sp * 0.4, t: 0, life: 0.35 + Math.random() * 0.35, col }); }
   },
   msg(m) {
     if (m.k === 'gun') {
-      Object.assign(this, { W: m.w, H: m.h, PW: m.pw, PH: m.ph, BR: m.br, BS: m.bs, BG: m.bg, pit: m.pit, mapName: m.map });
+      Object.assign(this, { W: m.w, H: m.h, PW: m.pw, PH: m.ph, BR: m.br, BS: m.bs, BG: m.bg, RC: m.rc, CD: m.cd, pit: m.pit, mapName: m.map });
       this.rects = m.rects.map(([x, y, w, h, one]) => ({ x, y, w, h, one }));
       M.players.forEach((_, i) => legendSet(i, '❤️❤️'));
       fxText(this, this.W / 2, 60, `📍 ${m.map}`, '#fff');
@@ -1947,12 +2060,11 @@ GAMES.gun = {
       if (m.i === M.me) this.shake = Math.max(this.shake, 3);
       SFX.play('gun');
     }
-    if (m.k === 'jump' && m.i === M.me) SFX.play('boing');
     if (m.k === 'spark') { this.burst(m.x, m.y, '#fff3c4', 7, 150); SFX.play('ping'); }
     if (m.k === 'hit') {
       this.burst(m.x, m.y, P(m.i).color, 12, 220);
       fxText(this, m.x, m.y - 28, '-34', '#ff4d6d');
-      if (m.i === M.me) this.shake = 10;
+      if (m.i === M.me) { this.shake = 10; if (this.P) { this.P.vx += m.kx || 0; this.P.vy += m.ky || 0; } } // projection appliquée à ma prédiction
       SFX.play('bonk');
     }
     if (m.k === 'ko') {
@@ -1963,7 +2075,7 @@ GAMES.gun = {
       if (m.i === M.me) this.shake = 16;
       SFX.play('boom');
     }
-    if (m.k === 's') pushSnap(this.S, m);
+    if (m.k === 's') { pushSnap(this.S, m); this.reconcile(m.p[M.me]); }
   },
   loop() {
     const cv = $('#gc'), c = cv.getContext('2d');
@@ -2008,10 +2120,11 @@ GAMES.gun = {
     const draw = () => {
       this.raf = requestAnimationFrame(draw);
       const S = this.S; if (!S.cur) return;
-      const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now;
+      const now = performance.now(), rawDt = (now - last) / 1000, dt = Math.min(0.05, rawDt); last = now;
       const a = alphaOf(S), A = S.prev.d, B = S.cur.d;
       // visée au clavier : ⬆ ⬇ font tourner le canon du côté où l'on regarde
       if (this.keyAim) { const right = Math.cos(this.aim) >= 0; this.aim += this.keyAim * (right ? 1 : -1) * dt * 2.6; }
+      this.predict(rawDt, now); // mon personnage avance tout de suite, sans attendre le serveur
       if (active && !dead) this.aimNow(false);
 
       c.save();
@@ -2019,9 +2132,9 @@ GAMES.gun = {
       c.drawImage(bg, 0, 0);
 
       // aperçu de trajectoire (moi seulement) : la parabole réelle de la prochaine balle
-      const mp = B.p[M.me], mq = A.p[M.me] || mp;
+      const mp = B.p[M.me], mq = A.p[M.me] || mp, myP = this.P;
       if (mp && mp[2] === 1 && active && !dead) {
-        const x0 = lerp(mq[0], mp[0], a), y0 = lerp(mq[1], mp[1], a) - 2;
+        const x0 = myP ? myP.x : lerp(mq[0], mp[0], a), y0 = (myP ? myP.y : lerp(mq[1], mp[1], a)) - 2;
         const ca = Math.cos(this.aim), sa = Math.sin(this.aim);
         // même intégration que le serveur (60 Hz, la vitesse du tireur s'ajoute à la balle)
         let x = x0 + ca * (PW + 12), y = y0 + sa * (PW + 12), vx = ca * this.BS + mp[6] * 3, vy = sa * this.BS + mp[7] * 1.5;
@@ -2047,11 +2160,13 @@ GAMES.gun = {
       B.p.forEach((p, i) => {
         if (p[2] !== 1) return;
         const q = A.p[i] && A.p[i][2] === 1 ? A.p[i] : p;
-        const x = lerp(q[0], p[0], a), y = lerp(q[1], p[1], a);
+        const pred = i === M.me && this.P; // moi : position prédite ; les autres : interpolés
+        const x = pred ? this.P.x : lerp(q[0], p[0], a), y = pred ? this.P.y : lerp(q[1], p[1], a);
+        const vx = pred ? this.P.vx / 10 : p[6], vy = pred ? this.P.vy / 10 : p[7], onGround = pred ? this.P.ground : !!p[11];
         const ang = i === M.me && active && !dead ? this.aim : p[3] / 100;
         const blink = p[8] && Math.floor(now / 90) % 2;
         c.globalAlpha = blink ? 0.45 : 1;
-        hero(c, i, x, y, PH + 3, { vx: p[6] / 2, vy: p[7] / 3, name: P(i).name, flip: Math.cos(ang) < 0, shadow: !!p[11] });
+        hero(c, i, x, y, PH + 3, { vx: vx / 2, vy: vy / 3, name: P(i).name, flip: Math.cos(ang) < 0, shadow: onGround, look: ang, air: !onGround, run: vx * 10 });
         // le pistolet : il suit la visée, se retourne quand on vise à gauche, recule au tir
         const fl = this.flash[i] && now - this.flash[i] < 90, kick = fl ? 4 : 0;
         c.save(); c.translate(x, y - 2); c.rotate(ang); if (Math.cos(ang) < 0) c.scale(1, -1);
@@ -2169,7 +2284,7 @@ GAMES.words = {
 
 // ── compte à rebours dessiné dans le jeu (Envol, Circuit) : le serveur envoie `go` = secondes restantes ──
 function goTrack(g, m) {
-  const was = g.S.cur && g.S.cur.d.go;
+  const was = g.S.last && g.S.last.go;
   if (m.go && Math.ceil(m.go) !== g.goN) { g.goN = Math.ceil(m.go); if (!replaying) SFX.play('tick'); }
   if (!m.go && was) { g.goEnd = performance.now(); if (!replaying) SFX.play('go'); }
 }
@@ -2241,9 +2356,9 @@ GAMES.circuit = {
     if (m.k === 's') { goTrack(this, m); pushSnap(this.S, m); }
     if (m.k === 'boost' && m.i === M.me) SFX.play('whoosh');
     if (m.k === 'crash' && m.i === M.me) { this.crashT = performance.now(); SFX.play('bonk'); }
-    if (m.k === 'splat' && m.i === M.me && this.S.cur) {
+    if (m.k === 'splat' && m.i === M.me && this.S.last) {
       // le gosse le plus proche devant/sous la voiture devient une flaque, et l'écran se couvre de sang
-      const z = this.S.cur.d.p[M.me][0];
+      const z = this.S.last.p[M.me][0];
       let best = -1, bd = Infinity;
       this.obs.forEach(([k, , type], q) => { if (type === 1 && !this.hitKids.has(q)) { const d = Math.abs(k * this.SEG - z); if (d < bd) { bd = d; best = q; } } });
       if (best >= 0) this.hitKids.add(best);
@@ -2526,7 +2641,7 @@ GAMES.flap = {
   msg(m) {
     if (m.k === 'flap') { Object.assign(this, { W: m.w, H: m.h, BX: m.bx, BR: m.br, PW: m.pw, gates: m.gates }); this.loop(); }
     if (m.k === 's') {
-      if (this.S.cur) m.p.forEach((p, i) => { if (!p[1] && this.S.cur.d.p[i][1]) legendSet(i, '💀'); });
+      if (this.S.last) m.p.forEach((p, i) => { if (!p[1] && this.S.last.p[i][1]) legendSet(i, '💀'); });
       goTrack(this, m);
       pushSnap(this.S, m);
     }
