@@ -65,6 +65,11 @@ function connect() {
 // ════════════════ UI de base ════════════════
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('hidden', s.id !== id));
+  // fond génératif : discret en partie (l'aire de jeu d'abord), vivant dans les menus
+  if (typeof FX !== 'undefined') {
+    FX.mood(id === 'game' ? 'play' : 'calm');
+    if (id === 'home') FX.scene(homeSeed(), null);
+  }
   $('#topbar').classList.toggle('hidden', id === 'home');
   document.body.classList.toggle('withbar', id !== 'home');
 }
@@ -203,29 +208,103 @@ function legend() {
 }
 function legendSet(i, txt) { const s = document.querySelector(`#legend [data-i="${i}"] .st`); if (s) s.textContent = txt; }
 
+// ════════════════ fond génératif « Courants de salon » (fx.js) ════════════════
+// accueil : une graine par jour ; salon : la graine est son code, chaque joueur un courant de sa couleur
+function homeSeed() { return 'clutch-' + new Date().toISOString().slice(0, 10); }
+function roomColors(r) { return r.members.map((_, i) => PALETTE[i % PALETTE.length]); }
+FX.init(homeSeed(), null);
+
 // ════════════════ confettis ════════════════
+// physique de papier : chaque confetti bat (il montre sa tranche puis sa face), freine dans l'air,
+// tombe à vitesse plafonnée et dérive en zigzag ; trois formes (carré, rond, serpentin).
+// Feux d'artifice : étincelles radiales qui scintillent et laissent une courte traînée.
 const Confetti = (() => {
   const cv = $('#confetti'), c = cv.getContext('2d');
-  let parts = [], raf = null;
-  const cols = ['#ffd23f', '#ff5fa2', '#3dd6ff', '#2ee59d', '#ff9f1c', '#b388ff', '#fff'];
-  function frame() {
-    cv.width = innerWidth; cv.height = innerHeight;
-    c.clearRect(0, 0, cv.width, cv.height);
-    parts.forEach((p) => {
-      p.vy += 0.25; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.vx *= 0.99;
-      c.save(); c.translate(p.x, p.y); c.rotate(p.r); c.fillStyle = p.c; c.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); c.restore();
-    });
-    parts = parts.filter((p) => p.y < cv.height + 40);
-    raf = parts.length ? requestAnimationFrame(frame) : (c.clearRect(0, 0, cv.width, cv.height), null);
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  let parts = [], sparks = [], raf = null, W = 0, H = 0, last = 0;
+  const BASE = ['#ffd23f', '#ff5fa2', '#3dd6ff', '#2ee59d', '#ff9f1c', '#b388ff', '#fff'];
+  const R = Math.random;
+  function size() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  return {
-    burst(n = 160) {
-      for (let k = 0; k < n; k++) {
-        const left = k % 2 === 0;
-        parts.push({ x: left ? 0 : innerWidth, y: innerHeight * 0.7, vx: (left ? 1 : -1) * (6 + Math.random() * 10), vy: -12 - Math.random() * 10,
-          r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, w: 8 + Math.random() * 6, h: 5 + Math.random() * 6, c: cols[k % cols.length] });
+  addEventListener('resize', () => { if (raf) size(); });
+  // 60 % aux couleurs du vainqueur, le reste à la palette du jeu (et un peu de blanc pour la lumière)
+  const pick = (colors) => (colors && colors.length && R() < 0.6 ? colors[Math.floor(R() * colors.length)] : BASE[Math.floor(R() * BASE.length)]);
+
+  function frame(now) {
+    const dt = Math.min(2.5, (now - last) / 16.67 || 1);
+    last = now;
+    c.clearRect(0, 0, W, H);
+    for (const p of parts) {
+      p.t += dt;
+      p.vy = Math.min(p.vy + 0.32 * dt, p.term);          // gravité, vitesse limite
+      p.vx *= Math.pow(0.975, dt);                        // traînée de l'air
+      p.x += (p.vx + Math.sin(p.t * p.wob + p.ph) * p.sway) * dt;
+      p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+      const flip = Math.cos(p.t * p.flip + p.ph);         // le battement : face, tranche, dos
+      c.save();
+      c.translate(p.x, p.y); c.rotate(p.rot);
+      c.fillStyle = p.c;
+      c.globalAlpha = 0.75 + 0.25 * Math.abs(flip);       // la tranche paraît plus sombre
+      if (p.shape === 0) c.fillRect(-p.w / 2, (-p.h / 2) * flip, p.w, p.h * flip);
+      else if (p.shape === 1) { c.beginPath(); c.ellipse(0, 0, p.w / 2, Math.max(0.6, (p.w / 2) * Math.abs(flip)), 0, 0, Math.PI * 2); c.fill(); }
+      else { // serpentin : ruban ondulé
+        c.strokeStyle = p.c; c.lineWidth = 2.6; c.beginPath();
+        for (let k = 0; k <= 6; k++) { const y = (k / 6 - 0.5) * p.h * 2.2, x = Math.sin(k * 1.3 + p.t * 0.25) * 3 * flip; k ? c.lineTo(x, y) : c.moveTo(x, y); }
+        c.stroke();
       }
-      if (!raf) frame();
+      c.restore();
+    }
+    parts = parts.filter((p) => p.y < H + 60 && p.x > -80 && p.x < W + 80);
+
+    for (const s of sparks) {
+      s.t += dt;
+      s.vx *= Math.pow(0.955, dt); s.vy = s.vy * Math.pow(0.955, dt) + 0.09 * dt;
+      s.px = s.x; s.py = s.y; s.x += s.vx * dt; s.y += s.vy * dt;
+      const k = 1 - s.t / s.life, tw = 0.55 + 0.45 * Math.sin(s.t * 1.7 + s.ph); // scintillement
+      if (k <= 0) continue;
+      c.globalAlpha = Math.max(0, k * tw);
+      c.strokeStyle = s.c; c.lineWidth = 2.2 * k + 0.6;
+      c.beginPath(); c.moveTo(s.px - s.vx * 2.5, s.py - s.vy * 2.5); c.lineTo(s.x, s.y); c.stroke();
+    }
+    c.globalAlpha = 1;
+    sparks = sparks.filter((s) => s.t < s.life);
+
+    raf = parts.length || sparks.length ? requestAnimationFrame(frame) : (c.clearRect(0, 0, W, H), null);
+  }
+  function run() { if (!raf) { size(); last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+  return {
+    // deux canons dans les coins bas, qui tirent vers le haut et le centre
+    burst(n = 160, colors) {
+      if (reduced.matches) n = Math.round(n * 0.2); // moins d'animations demandées : une pluie légère
+      for (let k = 0; k < n; k++) {
+        const left = k % 2 === 0, sh = R();
+        parts.push({
+          x: left ? -10 : innerWidth + 10, y: innerHeight * (0.72 + R() * 0.12),
+          vx: (left ? 1 : -1) * (5 + R() * 11), vy: -13 - R() * 11,
+          rot: R() * 6.28, vr: (R() - 0.5) * 0.3, t: 0, ph: R() * 6.28,
+          flip: 0.08 + R() * 0.16, wob: 0.04 + R() * 0.06, sway: 0.4 + R() * 1.4, term: 2.6 + R() * 2.2,
+          shape: sh < 0.55 ? 0 : sh < 0.85 ? 1 : 2,
+          w: 7 + R() * 7, h: 5 + R() * 7, c: pick(colors),
+        });
+      }
+      run();
+    },
+    // feu d'artifice : une gerbe radiale, deux anneaux de vitesse pour donner du volume
+    firework(x, y, colors) {
+      if (reduced.matches) return;
+      const n = 70, base = R() * 6.28;
+      for (let k = 0; k < n; k++) {
+        const ang = base + (k / n) * Math.PI * 2 + (R() - 0.5) * 0.12, sp = (k % 2 ? 4.2 : 6.6) * (0.8 + R() * 0.35);
+        sparks.push({ x, y, px: x, py: y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, t: 0, life: 50 + R() * 30, ph: R() * 6.28, c: k % 5 === 0 ? '#fff' : pick(colors) });
+      }
+      SFX.play('boom');
+      run();
     },
   };
 })();
@@ -353,11 +432,13 @@ function onMsg(m) {
       renderLobby();
       chatShow(true);
       if (isShown('home')) show('lobby');
+      if (!M) FX.scene(m.code, roomColors(m));
       break;
     case 'matchStart':
       clearTimeout(toLobbyTimer); toLobbyTimer = null;
       M = m; scores = new Array(m.sides.length).fill(0); prevScores = []; roundNo = 0; decisive = false;
       show('game'); renderScore();
+      FX.scene((room && room.code) || 'match', m.players.map((p) => p.color));
       break;
     case 'roundIntro':
       stopGame(); hideGag();
@@ -496,7 +577,8 @@ function showRoundEnd(m) {
   }
   overlay({ title, color, text: m.reason });
   hideGag();
-  if (mine === true) { SFX.play('win'); Confetti.burst(90); } else if (mine === false) SFX.play('lose');
+  if (mine === true) { SFX.play('win'); Confetti.burst(90, [color]); } else if (mine === false) SFX.play('lose');
+  if (m.winSide !== -1) FX.pulse(color);
   if (m.losers.length && m.losers.length < M.players.length) {
     const names = m.losers.map((i) => P(i).name).join(' & ');
     const sameSide = m.losers.every((i) => P(i).side === P(m.losers[0]).side);
@@ -514,7 +596,14 @@ function showMatchEnd(m) {
   const line = M.sides.map((_, s) => `${sideLabel(s)} ${m.scores[s]}`).join(' · ');
   overlay({ icon: iWon ? '🏆' : '💀', title: iWon ? 'VICTOIRE !' : 'DÉFAITE…', color: iWon ? '#2ee59d' : '#ff4d6d', text: `${winNames} ${m.winners.length > 1 ? 'gagnent' : 'gagne'} le match — ${line}` });
   SFX.play(iWon ? 'win' : 'lose');
-  if (iWon) { Confetti.burst(220); setTimeout(() => Confetti.burst(160), 900); }
+  const winCols = m.winners.map(sideColor);
+  FX.celebrate(winCols);
+  if (iWon) {
+    Confetti.burst(200, winCols);
+    // feux d'artifice à la couleur du vainqueur
+    [[0.3, 0.32, 350], [0.7, 0.28, 900], [0.5, 0.2, 1500]].forEach(([x, y, ms]) => setTimeout(() => Confetti.firework(innerWidth * x, innerHeight * y, winCols), ms));
+    setTimeout(() => Confetti.burst(140, winCols), 1100);
+  }
   if (m.losers.length) {
     const names = m.losers.map(sideLabel).join(' & ');
     const capName = m.losers.length === 1 ? (M.teams ? `L'${names}` : names) : `La bande à ${sideLabel(m.losers[0])}`;
@@ -526,6 +615,7 @@ function showMatchEnd(m) {
     toLobbyTimer = null;
     if (M !== Mref) return;
     hideOverlay(); M = null; show('lobby'); renderLobby();
+    if (room) FX.scene(room.code, roomColors(room));
   }, 8000);
 }
 
