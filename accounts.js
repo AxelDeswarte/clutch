@@ -15,15 +15,16 @@ function secret() {
   return store.meta.secret;
 }
 
-function hashPass(pass) {
+// scrypt asynchrone : un hachage (~50 ms) ne doit pas figer les parties en cours
+const scrypt = (pass, salt) => new Promise((ok, ko) => crypto.scrypt(pass, salt, 32, (e, k) => (e ? ko(e) : ok(k))));
+async function hashPass(pass) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const h = crypto.scryptSync(pass, salt, 32).toString('hex');
-  return `${salt}:${h}`;
+  return `${salt}:${(await scrypt(pass, salt)).toString('hex')}`;
 }
-function checkPass(pass, stored) {
+async function checkPass(pass, stored) {
   const [salt, h] = String(stored).split(':');
   if (!salt || !h) return false;
-  const a = crypto.scryptSync(pass, salt, 32), b = Buffer.from(h, 'hex');
+  const a = await scrypt(pass, salt), b = Buffer.from(h, 'hex');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
@@ -42,8 +43,9 @@ function readToken(tok) {
   const [id, exp, sig] = parts;
   const u = store.get(id);
   if (!u) return null;
-  const good = signBody(`${id}.${exp}`, u.pv);
-  if (sig.length !== good.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(good))) return null;
+  // comparer des octets, pas des caractères : un « é » dans la signature ferait sinon planter timingSafeEqual (et le serveur)
+  const a = Buffer.from(sig), b = Buffer.from(signBody(`${id}.${exp}`, u.pv));
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   if (Number(exp) < Date.now()) return null;
   return u;
 }
@@ -60,16 +62,26 @@ const emailErr = (email, self) => {
   if (o && o !== self) return 'Cet email est déjà utilisé par un autre compte.';
   return null;
 };
-const passErr = (pass) => (pass.length < 4 || pass.length > 72 ? 'Mot de passe : 4 caractères minimum.' : null);
+// 8 caractères minimum pour tout nouveau mot de passe (les anciens comptes gardent le leur)
+const PASS_MIN = 8;
+const passErr = (pass) => (pass.length < PASS_MIN ? `Mot de passe : ${PASS_MIN} caractères minimum.` : pass.length > 72 ? 'Mot de passe : 72 caractères maximum.' : null);
 
-function register(name, pass, email) {
+// trop d'échecs de connexion sur un même compte : on le bloque 15 min (contre le devinage de mot de passe)
+const FAIL_MAX = 10, FAIL_MS = 15 * 60 * 1000;
+const fails = new Map(); // id -> [horodatages]
+const recentFails = (id) => { const now = Date.now(), l = (fails.get(id) || []).filter((t) => now - t < FAIL_MS); if (l.length) fails.set(id, l); else fails.delete(id); return l; };
+
+async function register(name, pass, email) {
   name = String(name || '').trim();
   pass = String(pass || '');
   email = String(email || '').trim();
-  const err = nameErr(name) || emailErr(email) || passErr(pass);
+  let err = nameErr(name) || emailErr(email) || passErr(pass);
+  if (err) return { err };
+  const hash = await hashPass(pass);
+  err = nameErr(name) || emailErr(email); // revérifié : un autre a pu prendre le pseudo pendant le hachage
   if (err) return { err };
   const u = {
-    id: crypto.randomBytes(8).toString('hex'), name, email, pass: hashPass(pass), created: Date.now(),
+    id: crypto.randomBytes(8).toString('hex'), name, email, pass: hash, created: Date.now(),
     xp: 0, avatar: C.BASE_AVATARS[Math.floor(Math.random() * C.BASE_AVATARS.length)], frame: 'classic', title: 'bleu',
     stats: { matches: 0, wins: 0, rounds: 0 }, friends: [], reqIn: [], reqOut: [],
   };
@@ -77,9 +89,14 @@ function register(name, pass, email) {
   return { user: u };
 }
 // on se connecte avec son pseudo OU son email
-function login(name, pass) {
+async function login(name, pass) {
   const u = String(name || '').includes('@') ? store.findByEmail(name) : store.findByName(name);
-  if (!u || !checkPass(String(pass || ''), u.pass)) return { err: 'Pseudo ou mot de passe incorrect.' };
+  if (u && recentFails(u.id).length >= FAIL_MAX) return { err: 'Trop d\'essais sur ce compte. Réessaie dans 15 minutes, ou utilise « Mot de passe oublié ».' };
+  if (!u || !(await checkPass(String(pass || ''), u.pass))) {
+    if (u) { fails.set(u.id, [...recentFails(u.id), Date.now()]); console.warn(`Connexion refusée pour le compte ${u.id}`); }
+    return { err: 'Pseudo ou mot de passe incorrect.' };
+  }
+  fails.delete(u.id);
   return { user: u };
 }
 
@@ -101,9 +118,9 @@ function rename(u, name) {
   store.rename(u, name);
   return null;
 }
-function setEmail(u, email, pass) {
+async function setEmail(u, email, pass) {
   email = String(email || '').trim();
-  if (!checkPass(String(pass || ''), u.pass)) return 'Mot de passe incorrect.';
+  if (!(await checkPass(String(pass || ''), u.pass))) return 'Mot de passe incorrect.';
   const err = emailErr(email, u);
   if (err) return err;
   store.setEmail(u, email);
@@ -119,17 +136,20 @@ function startReset(email) {
   store.save(u);
   return { u, token };
 }
-function finishReset(token, pass) {
+async function finishReset(token, pass) {
   pass = String(pass || '');
   const h = sha(String(token || ''));
-  let u = null;
-  for (const v of store.users.values()) if (v.reset && v.reset.h === h) { u = v; break; }
-  if (!u || u.reset.exp < Date.now()) return { err: 'Lien expiré ou déjà utilisé. Redemande un email.' };
+  const find = () => { for (const v of store.users.values()) if (v.reset && v.reset.h === h && v.reset.exp >= Date.now()) return v; return null; };
+  let u = find();
+  if (!u) return { err: 'Lien expiré ou déjà utilisé. Redemande un email.' };
   const err = passErr(pass);
   if (err) return { err };
-  u.pass = hashPass(pass);
+  const hash = await hashPass(pass);
+  if (find() !== u) return { err: 'Lien expiré ou déjà utilisé. Redemande un email.' }; // lien utilisé entre-temps
+  u.pass = hash;
   u.pv = (u.pv || 0) + 1;
   delete u.reset;
+  fails.delete(u.id);
   store.save(u);
   return { user: u };
 }
@@ -186,4 +206,4 @@ function awardMatch(u, { roundsWon, won, points }) {
   return { gained, xp: u.xp, level: after, prevLevel: before, unlocks: C.unlocksBetween(before, after), xpLevel: C.xpForLevel(after), xpNext: C.xpForLevel(after + 1) };
 }
 
-module.exports = { register, login, rename, setEmail, startReset, finishReset, RESET_MS, makeToken, readToken, publicProfile, meProfile, equip, friendRequest, friendAccept, friendRemove, awardMatch, level };
+module.exports = { PASS_MIN, register, login, rename, setEmail, startReset, finishReset, RESET_MS, makeToken, readToken, publicProfile, meProfile, equip, friendRequest, friendAccept, friendRemove, awardMatch, level };

@@ -159,11 +159,18 @@ class Room {
     if (this.roundLog.length > 8000) this.roundLog.shift();
   }
   later(fn, ms) {
-    const id = setTimeout(() => { this.timers.delete(id); fn(); }, ms);
+    const id = setTimeout(() => { this.timers.delete(id); this.safe(fn); }, ms);
     this.timers.add(id);
     return id;
   }
-  every(fn, ms) { const id = setInterval(fn, ms); this.timers.add(id); return id; }
+  every(fn, ms) { const id = setInterval(() => this.safe(fn), ms); this.timers.add(id); return id; }
+  // un bug dans un mini-jeu interrompt ce salon (retour au lobby), pas tout le serveur
+  safe(fn) {
+    try { fn(); } catch (e) {
+      console.error(`Erreur dans le salon ${this.code} (${this.gameKey || 'lobby'}) :`, e);
+      try { this.abort('Oups, ce mini-jeu a planté. Retour au salon.'); } catch (e2) { console.error(e2); }
+    }
+  }
   cancel(id) { if (id) { clearTimeout(id); clearInterval(id); this.timers.delete(id); } }
   clearTimers() { for (const id of this.timers) { clearTimeout(id); clearInterval(id); } this.timers.clear(); }
   survivalOver(alive) {
@@ -413,7 +420,7 @@ class Room {
   input(member, m) {
     if (this.state !== 'round' || !this.game || !this.p) return;
     const i = this.p.indexOf(member);
-    if (i >= 0) this.game.input(i, m);
+    if (i >= 0) this.safe(() => this.game.input(i, m));
   }
 
   // scores[i] : plus haut = mieux classé
@@ -502,6 +509,14 @@ function newCode() {
 }
 
 // ═════════════════ HTTP ═════════════════
+// en-têtes de sécurité : pas d'intégration dans une iframe (clickjacking), scripts uniquement depuis le site,
+// pas de Referer (le lien « mot de passe oublié » porte un jeton dans l'adresse)
+const SEC_HEADERS = {
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+};
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 const server = http.createServer((req, res) => {
   let p;
@@ -509,10 +524,10 @@ const server = http.createServer((req, res) => {
   if (p === '/') p = '/index.html';
   if (p === '/health') { res.writeHead(200); return res.end('ok'); }
   const file = path.join(PUBLIC, path.normalize(p));
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
+  if (!file.startsWith(PUBLIC + path.sep)) { res.writeHead(403, SEC_HEADERS); return res.end(); }
   fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    if (err) { res.writeHead(404, SEC_HEADERS); return res.end('Not found'); }
+    res.writeHead(200, { ...SEC_HEADERS, 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 });
@@ -540,24 +555,57 @@ function leaveRoom(S) {
   r.leave(m);
 }
 
-wss.on('connection', (ws) => {
-  const S = { ws, user: null, room: null, member: null, tries: [] };
+// limites par adresse IP : rouvrir une connexion ne remet plus le compteur à zéro.
+// Sur Render, l'adresse du joueur arrive dans X-Forwarded-For (premier élément).
+const clientIp = (req) => {
+  const fwd = process.env.RENDER || process.env.TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  return fwd || req.socket.remoteAddress || '?';
+};
+const ipHits = new Map(); // "type|ip" -> [horodatages]
+function ipLimited(kind, ip, max, windowMs) {
+  const k = `${kind}|${ip}`, now = Date.now();
+  const l = (ipHits.get(k) || []).filter((t) => now - t < windowMs);
+  l.push(now);
+  ipHits.set(k, l);
+  return l.length > max;
+}
+setInterval(() => { const now = Date.now(); for (const [k, l] of ipHits) if (!l.length || now - l[l.length - 1] > 3600000) ipHits.delete(k); }, 600000);
+
+// pseudo d'invité : ni le pseudo d'un compte existant, ni un faux « 🤖 » de bot
+function guestNameErr(name) {
+  if (/^\s*🤖/u.test(name)) return 'Le 🤖 est réservé aux bots.';
+  if (store.findByName(name)) return 'Ce pseudo appartient à un compte : connecte-toi, ou choisis-en un autre.';
+  return null;
+}
+
+wss.on('connection', (ws, req) => {
+  const S = { ws, user: null, room: null, member: null, tries: [], ip: clientIp(req) };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
   const reply = (msg) => sendWs(ws, msg);
   const fail = (msg) => reply({ t: 'error', msg });
+  // 10 essais / min par connexion, 30 / min par adresse (une soirée entre potes = souvent la même box)
   const rateLimited = () => {
     const now = Date.now();
     S.tries = S.tries.filter((t) => now - t < 60000);
     S.tries.push(now);
-    return S.tries.length > 10;
+    return S.tries.length > 10 || ipLimited('auth', S.ip, 30, 60000);
   };
+  const open = () => ws.readyState === 1; // la connexion a pu se fermer pendant un hachage
 
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
+    // un bug dans un message (ou un mini-jeu) ne doit jamais arrêter le serveur pour tout le monde
+    Promise.resolve().then(() => handle(m)).catch((e) => {
+      console.error(`Message « ${m.t} » ignoré :`, e);
+      fail('Oups, une erreur est survenue.');
+    });
+  });
+
+  async function handle(m) {
     const room = S.room, member = S.member;
 
     switch (m.t) {
@@ -584,7 +632,9 @@ wss.on('connection', (ws) => {
       case 'register':
       case 'login': {
         if (rateLimited()) return fail('Trop d\'essais, attends une minute.');
-        const res = m.t === 'register' ? ACC.register(m.name, m.pass, m.email) : ACC.login(m.name, m.pass);
+        if (m.t === 'register' && ipLimited('register', S.ip, 10, 3600000)) return reply({ t: 'authErr', msg: 'Trop de comptes créés depuis cette connexion, réessaie plus tard.' });
+        const res = m.t === 'register' ? await ACC.register(m.name, m.pass, m.email) : await ACC.login(m.name, m.pass);
+        if (!open()) return;
         if (res.err) return reply({ t: 'authErr', msg: res.err });
         setUser(S, res.user);
         reply({ t: 'token', token: ACC.makeToken(res.user.id) });
@@ -606,7 +656,8 @@ wss.on('connection', (ws) => {
       }
       case 'resetPass': {
         if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
-        const res = ACC.finishReset(m.token, m.pass);
+        const res = await ACC.finishReset(m.token, m.pass);
+        if (!open()) return;
         if (res.err) return reply({ t: 'acctErr', k: 'reset', msg: res.err });
         // les autres sessions de ce compte sont déconnectées (leur jeton n'est plus valable)
         online.get(res.user.id)?.forEach((S2) => { if (S2 !== S) { sendWs(S2.ws, { t: 'tokenBad' }); setUser(S2, null); } });
@@ -630,9 +681,11 @@ wss.on('connection', (ws) => {
       case 'setEmail': {
         if (!S.user) return;
         if (rateLimited()) return reply({ t: 'acctErr', msg: 'Trop d\'essais, attends une minute.' });
-        const err = ACC.setEmail(S.user, m.email, m.pass);
+        const u = S.user;
+        const err = await ACC.setEmail(u, m.email, m.pass);
+        if (!open()) return;
         if (err) return reply({ t: 'acctErr', k: 'email', msg: err });
-        pushMe(S.user.id);
+        pushMe(u.id);
         reply({ t: 'acctOk', k: 'email', msg: 'Email enregistré ✉️' });
         return;
       }
@@ -686,8 +739,9 @@ wss.on('connection', (ws) => {
           if (r.members.length >= MAX_MEMBERS) return fail(`Salon plein (${MAX_MEMBERS} max).`);
           if (r.state !== 'lobby') return fail('Un match est en cours, réessaie à la fin.');
         }
-        if (room) leaveRoom(S);
         const name = String(m.name || '').trim().slice(0, 16) || 'Invité';
+        if (!S.user) { const err = guestNameErr(name); if (err) return fail(err); }
+        if (room) leaveRoom(S);
         S.room = r;
         S.member = r.join(S, { name, avatar: m.avatar });
         presenceChanged(S.user && S.user.id); // le statut « dans un salon » dépend de S.member
@@ -750,7 +804,7 @@ wss.on('connection', (ws) => {
         break;
       }
     }
-  });
+  }
 
   ws.on('close', () => {
     if (S.room && S.member && S.member.ws === ws) S.room.disconnect(S.member);

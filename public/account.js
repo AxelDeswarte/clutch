@@ -163,7 +163,7 @@ if (resetToken) {
 }
 $('#btnReset').onclick = () => {
   const a = $('#rPass').value, b = $('#rPass2').value;
-  if (a.length < 4) { $('#rErr').textContent = 'Mot de passe : 4 caractères minimum.'; return; }
+  if (a.length < 8) { $('#rErr').textContent = 'Mot de passe : 8 caractères minimum.'; return; }
   if (a !== b) { $('#rErr').textContent = 'Les deux mots de passe ne sont pas identiques.'; return; }
   send({ t: 'resetPass', token: resetToken, pass: a });
 };

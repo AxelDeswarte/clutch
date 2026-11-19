@@ -310,7 +310,7 @@ function renderLobby() {
   }
   $('#count').textContent = `${r.members.length}/10`;
   const bots = r.members.some((m) => m.bot);
-  $('#modes').innerHTML = r.modes.map((m) => { const u = MODE_UI[m.key]; return `<div class="mode ${m.key === r.mode ? 'on' : ''}" data-mode="${m.key}"><span class="i">${u[0]}</span><b>${u[1]}</b><small>${u[2]}</small></div>`; }).join('');
+  $('#modes').innerHTML = r.modes.map((m) => { const u = MODE_UI[m.key]; return `<button type="button" class="mode ${m.key === r.mode ? 'on' : ''}" data-mode="${m.key}" aria-pressed="${m.key === r.mode}"><span class="i">${u[0]}</span><b>${u[1]}</b><small>${u[2]}</small></button>`; }).join('');
   const pts = r.goal === 'points';
   const N = pts ? r.target : r.rounds;
   const twoSides = r.mode !== 'ffa';
@@ -529,9 +529,64 @@ function showMatchEnd(m) {
   }, 8000);
 }
 
+// ════════════════ fenêtres : Échap ferme, le focus reste dedans puis revient d'où il venait ════════════════
+// [id, bouton qui ferme/annule, élément à focaliser à l'ouverture]
+const DIALOGS = [
+  ['confirmBox', '#cfNo', '#cfNo'],
+  ['resetModal', '#btnResetCancel', '#rPass'],
+  ['acctModal', '#acctClose', '#mName'],
+  ['custom', '#customClose', '#customClose'],
+  ['gamesModal', '#gmClose', '#gmClose'],
+];
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"]), a[href]';
+function openDialogs() {
+  return DIALOGS.map(([id]) => document.getElementById(id)).filter((el) => el && !el.classList.contains('hidden'))
+    .sort((a, b) => (+getComputedStyle(b).zIndex || 0) - (+getComputedStyle(a).zIndex || 0));
+}
+const topDialog = () => openDialogs()[0] || null;
+DIALOGS.forEach(([id, , first]) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  const title = el.querySelector('.lbl, h3');
+  if (title) { title.id = title.id || `${id}Title`; el.setAttribute('aria-labelledby', title.id); }
+  let back = null; // élément qui avait le focus avant l'ouverture
+  new MutationObserver(() => {
+    const open = !el.classList.contains('hidden');
+    if (open && !el.contains(document.activeElement)) {
+      back = document.activeElement;
+      setTimeout(() => { const f = el.querySelector(first) || el.querySelector(FOCUSABLE); if (f && !el.contains(document.activeElement)) f.focus(); }, 0);
+    } else if (!open && back) {
+      const b = back; back = null;
+      if (document.body.contains(b) && b.offsetParent !== null && !topDialog()) b.focus();
+    }
+  }).observe(el, { attributes: true, attributeFilter: ['class'] });
+});
+// capture : passe avant les touches du jeu
+document.addEventListener('keydown', (e) => {
+  const d = topDialog();
+  if (!d) return;
+  if (e.key === 'Escape') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const close = DIALOGS.find(([id]) => id === d.id);
+    const btn = close && d.querySelector(close[1]);
+    if (btn) btn.click(); else d.classList.add('hidden');
+  } else if (e.key === 'Tab') {
+    const list = [...d.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null);
+    if (!list.length) return;
+    const i = list.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { e.preventDefault(); list[list.length - 1].focus(); }
+    else if (!e.shiftKey && (i === -1 || i === list.length - 1)) { e.preventDefault(); list[0].focus(); }
+  }
+}, true);
+
 // ════════════════ entrées clavier ════════════════
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
+  if (topDialog()) return; // une fenêtre est ouverte : les touches ne vont pas au jeu
+  // en partie, Espace/flèches ne doivent pas re-cliquer le dernier bouton cliqué (ex. « Prêt »)
+  if (active && cur && cur.key && e.target.tagName === 'BUTTON' && (e.code === 'Space' || e.key.startsWith('Arrow'))) e.preventDefault();
   if (introOpen && (e.key === 'Enter' || e.code === 'Space')) { e.preventDefault(); sendReady(); return; }
   if (active && !dead && cur && cur.key) cur.key(e);
 });

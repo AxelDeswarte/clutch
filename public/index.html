@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CLUTCH — la soirée mini-jeux</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
 <style>
@@ -31,6 +31,11 @@
   @keyframes drift { to { background-position: 280px 280px; } }
   #app { width: 100%; max-width: 980px; padding: 18px 14px 90px; }
   .hidden { display: none !important; }
+  /* zoom à deux doigts autorisé (accessibilité), sans le délai du double-tap */
+  html { touch-action: manipulation; }
+  /* focus clavier bien visible, distinct du survol */
+  button:focus-visible, .btn:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline: 4px solid var(--blue); outline-offset: 3px; }
+  input:focus-visible { box-shadow: 0 0 0 4px rgba(61,214,255,.55); }
 
   /* --- briques cartoon --- */
   .card { background: var(--paper); border: 3px solid var(--line); border-radius: 22px; box-shadow: 0 8px 0 var(--line); padding: 20px; }
@@ -94,7 +99,7 @@
   .teamcol h4 { font-family: var(--display); margin: 0 0 8px; font-size: 18px; display: flex; justify-content: space-between; align-items: center; }
   .empty { padding: 10px; border: 2.5px dashed rgba(27,20,64,.35); border-radius: 14px; text-align: center; color: var(--mut); font-size: 14px; }
   .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-  .mode { background: #fff; border: 3px solid var(--line); border-radius: 18px; padding: 10px 6px; text-align: center; cursor: pointer; box-shadow: 0 4px 0 var(--line); transition: transform .1s; }
+  .mode { background: #fff; border: 3px solid var(--line); border-radius: 18px; padding: 10px 6px; text-align: center; cursor: pointer; box-shadow: 0 4px 0 var(--line); transition: transform .1s; font: inherit; color: inherit; }
   .mode .i { font-size: 30px; display: block; }
   .mode b { font-family: var(--display); font-size: 18px; display: block; }
   .mode small { color: var(--mut); font-size: 12px; }
@@ -452,6 +457,15 @@
     .ucp { grid-template-columns: 1fr; }
     .prow { grid-template-columns: 110px 1fr 26px; }
   }
+  /* animations réduites : on coupe tout ce qui boucle ; les signaux de jeu gardent leur couleur
+     (feu rouge, joueur qui parle, syllabe brûlante), et la touche courante reste animée car c'est l'info principale */
+  @media (prefers-reduced-motion: reduce) {
+    body::before, .logo span, #ovIcon, #ovReady .btn, .fr-fire, .fr-rainbow, .fr-glitch, .rx.wait, .ucp.speaking, .sylbox.hot b { animation: none !important; }
+    .pl, .ovcard, .standings > div, .mchip i, #chatPeek .cm, .xpbox.up, .bump { animation-duration: .01ms !important; }
+    .btn, .mode { transition: none; }
+  }
+  /* textes minimum 12 px (étiquettes de niveau, verrous, sous-titres) */
+  .lv, .lock, .bin small, .cpal .cdot small, .sbscore .pts1 { font-size: 12px; }
 </style>
 </head>
 <body>
